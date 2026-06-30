@@ -1,0 +1,35 @@
+# ==========================================
+# Language Artifacts (C/C++)
+# ==========================================
+*.o
+*.obj
+*.d
+
+# ==========================================
+# Executable Binaries (Universal)
+# ==========================================
+# Blocks Windows executables
+*.exe
+# Blocks macOS executables
+*.app
+# Blocks generic Linux/macOS binary outputs
+*.out
+
+# ==========================================
+# Test Folder Exceptions
+# ==========================================
+# 1. Ignore ALL files inside the tests folder by default
+tests/**/*
+
+# 2. ALLOW Git to track your C/C++ source and header files
+!tests/**/*.cpp
+!tests/**/*.c
+!tests/**/*.h
+!tests/**/*.hpp
+
+# ==========================================
+# Temporary Test Sandboxes
+# ==========================================
+# Blocks any runtime repositories created while testing commands
+tests/sandbox/
+tests/tmp/
