@@ -16,6 +16,7 @@
 *.app
 # Blocks generic Linux/macOS binary outputs
 *.out
+.DS_Store
 
 # ==========================================
 # Test Folder Exceptions
