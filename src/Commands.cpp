@@ -20,9 +20,26 @@ string get_current_timestamp() {
     ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
     return ss.str();
 }
+string Commands::get_current_branch_name() {
+    if (!fs::exists(".voxel/HEAD")) return "main";
+    
+    std::ifstream ifs(".voxel/HEAD");
+    string line;
+    std::getline(ifs, line);
+    ifs.close();
+
+    // line will look like: "ref: refs/heads/exp@feat"
+    string prefix = "ref: refs/heads/";
+    if (line.find(prefix) == 0) {
+        return line.substr(prefix.length()); // Returns "exp@feat"
+    }
+    return "main";
+}
 
 void Commands::track_all_files(){
     string index_path = ".voxel/index";
+    string objects_dir = ".voxel/objects";
+    fs::create_directories(objects_dir);
     vector<string> files = FileSystem::list_workspace_files();
     ofstream index_file(index_path, ios::trunc);
     if (!index_file.is_open()) {
@@ -35,6 +52,14 @@ void Commands::track_all_files(){
         string content = FileSystem::read_file_to_string(file);
         string file_hash = Hashing::generate_sha256(content);
         index_file << file << " " << file_hash << "\n";
+        string object_file_path = objects_dir + "/" + file_hash;
+        if (!fs::exists(object_file_path)) {
+            ofstream object_file(object_file_path, ios::trunc);
+            if (object_file.is_open()) {
+                object_file << content; // <─── THIS writes your raw text code into the vault!
+                object_file.close();
+            }
+        }
         cout << "  Tracked: " << file << " -> [" << file_hash.substr(0, 8) << "...]\n";
         tracked_count++;
     }
@@ -54,7 +79,7 @@ void Commands::commit_changes(const string& message){
         return;
     }
     string tree_hash = Hashing::generate_sha256(index_content);
-    string tree_object_path = ".voxel/object" + tree_hash;
+    string tree_object_path = ".voxel/objects/" + tree_hash;
     if(!fs::exists(tree_object_path)){
         ofstream tree_file(tree_object_path);
         tree_file << index_content;
@@ -62,9 +87,10 @@ void Commands::commit_changes(const string& message){
     }
 
     string parent_hash = "0000000000000000000000000000000000000000000000000000000000000000"; // default zero string
-    string main_branch_path = ".voxel/refs/heads/main";
-    if(fs::exists(main_branch_path)){
-        string saved_parent = FileSystem::read_file_to_string(main_branch_path);
+    string current_branch = get_current_branch_name();
+    string current_branch_path = ".voxel/refs/heads/" + current_branch;
+    if(fs::exists(current_branch_path)){
+        string saved_parent = FileSystem::read_file_to_string(current_branch_path);
         if(!saved_parent.empty()){
             parent_hash = saved_parent;
         }   
@@ -76,16 +102,16 @@ void Commands::commit_changes(const string& message){
     commit_stream << "parent - " << parent_hash << "\n";
     commit_stream << "author - " << author << "\n";
     commit_stream << "timestamp - " << timestamp << "\n\n";
-    commit_stream << message << "\n";
+    commit_stream << "Message - " << message << "\n";
     string commit_content = commit_stream.str();
     string commit_hash = Hashing::generate_sha256(commit_content);
     string commit_object_path = ".voxel/objects/" + commit_hash;
     ofstream commit_file(commit_object_path);
     commit_file << commit_content;
     commit_file.close();
-    ofstream main_branch_file(main_branch_path, ios::trunc);
-    main_branch_file << commit_hash;
-    main_branch_file.close();
+    ofstream current_branch_file(current_branch_path, ios::trunc);
+    current_branch_file << commit_hash;
+    current_branch_file.close();
     cout << "\033[1;32mCommit successful!\033[0m\n";
     cout << "  Commit ID: [" << commit_hash.substr(0, 8) << "...]\n";
     cout << "  Message:   " << message << "\n";
@@ -96,34 +122,55 @@ void Commands::create_branch(const string& branch_name){
         std::cout << "\033[31mError: Branch name cannot be empty or contain spaces.\033[0m\n";
         return;
     }
-
-    std::string current_commit = "";
-    std::string main_branch_path = ".voxel/refs/heads/main";
-
-    // 2. Discover our current position by reading the main branch head
-    if (fs::exists(main_branch_path)) {
-        current_commit = FileSystem::read_file_to_string(main_branch_path);
-    }
-
-    if (current_commit.empty()) {
-        std::cout << "\033[31mError: Cannot create branch. You must make at least one commit on 'main' first.\033[0m\n";
+    string current_parent_branch = get_current_branch_name();
+    string current_parent_path = ".voxel/refs/heads/" + current_parent_branch;
+    string active_hash = FileSystem::read_file_to_string(current_parent_path);
+    if (active_hash.empty()) {
+        std::cout << "\033[31mError: Parent timeline has no commit history yet.\033[0m\n";
         return;
     }
+    string full_new_branch;
+    if(current_parent_branch == "main"){
+        full_new_branch = branch_name;
+    } 
+    else {
+        full_new_branch = current_parent_branch + "@" + branch_name;
+    }
+    string target_file_path = ".voxel/refs/heads/" + full_new_branch;
+    if (fs::exists(target_file_path)) {
+        std::cout << "\033[31mError: Timeline cluster path already allocated.\033[0m\n";
+        return;
+    }
+    std::ofstream ofs(target_file_path);
+    ofs << active_hash; 
+    ofs.close();
+    string printing_wala = full_new_branch;
+    replace(printing_wala.begin(), printing_wala.end(), '@', '/');
 
-    // 3. Create the new branch pointer file inside refs/heads/
-    std::string new_branch_path = ".voxel/refs/heads/" + branch_name;
+
+
+    std::cout << "\033[1;32mBranch '" << printing_wala << "' successfully created at commit [" << active_hash.substr(0, 8) << "...]!\033[0m\n";
+
+} //create branch
+
+void Commands::switch_branch(const string& target_branch){
+    if(target_branch.empty() || target_branch.find(' ') != std::string::npos) {
+        std::cout << "\033[31mError: Branch name cannot be empty or contain spaces.\033[0m\n";
+        return;
+    }
+    string internal_name = target_branch;
+    replace(internal_name.begin(), internal_name.end(), '/', '@');
+    string branch_path = ".voxel/refs/heads/" + internal_name;
+    if (!fs::exists(branch_path) || fs::is_directory(branch_path)) {
+        std::cout << "\033[31mError: Branch '" << target_branch << "' does not exist.\033[0m\n";
+        return;
+    }
+    ofstream head_file(".voxel/HEAD", ios::trunc);
+    head_file << "ref: refs/heads/" << internal_name;
+    head_file.close();
+    std::cout << "\033[1;32mSwitched to branch '" << target_branch << "' successfully!\033[0m\n";
+
     
-    if (fs::exists(new_branch_path)) {
-        std::cout << "\033[31mError: A branch named '" << branch_name << "' already exists.\033[0m\n";
-        return;
-    }
-
-    std::ofstream new_branch_file(new_branch_path);
-    new_branch_file << current_commit;
-    new_branch_file.close();
-
-    std::cout << "\033[1;32mBranch '" << branch_name << "' successfully created at commit [" << current_commit.substr(0, 8) << "...]!\033[0m\n";
-
 }
 
 

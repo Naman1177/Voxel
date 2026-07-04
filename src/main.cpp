@@ -81,6 +81,10 @@ int main(int argc, char* argv[]) {
         
         Commands::commit_changes(message);
     }
+    else if (command == "where"){
+        string current_branch = Commands::get_current_branch_name();
+        cout << "\033[1;36mCurrent Branch: " << current_branch << "\033[0m\n";
+    }
     else if (command == "branch") {
         std::string branch_name;
 
