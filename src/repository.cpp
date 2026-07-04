@@ -8,7 +8,7 @@ namespace fs = std::filesystem;
 bool Repository::init_repository(){
     std::string root_dir = ".voxel";
     std::string objects_dir = root_dir + "/objects";
-    std::string refs_dir = root_dir + "/refs";
+    std::string refs_dir = root_dir + "/refs/heads";
     if (fs::exists(root_dir)) {
         std::cout << "\033[31mError: A Voxel repository already exists in this directory.\033[0m\n";
         return false;
