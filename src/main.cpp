@@ -158,6 +158,15 @@ int main(int argc, char *argv[])
     {
         Commands::export_repository_pdf();
     }
+    else if (command == "restore") {
+        std::string expression = "";
+        if (argc > 2) {
+            expression = argv[2]; // Capture options like: exp2/exp-3, head, or a hash
+        }
+        Commands::restore_workspace_state(expression);
+    }
+    
+    
     else
     {
         cout << "Error: Unknown command '" << command << "'\n";
@@ -166,3 +175,5 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+
+    

@@ -524,6 +524,189 @@ void Commands::export_repository_pdf() {
 
 }
     
+void Commands::checkout_files_from_tree(const std::string& tree_hash) {
+    std::string tree_path = ".voxel/objects/" + tree_hash;
+    if (!fs::exists(tree_path)) {
+        std::cerr << "\033[31mError: Missing tree structure " << tree_hash.substr(0, 8) << " inside vault.\033[0m\n";
+        return;
+    }
+
+    std::ifstream tree_file(tree_path);
+    std::string line;
+
+    // 1. Loop through the tree and reconstruct the physical files
+    while (std::getline(tree_file, line)) {
+        if (line.empty()) continue;
+        std::stringstream ss(line);
+        std::string filepath, file_hash;
+        ss >> filepath >> file_hash;
+
+        std::string object_path = ".voxel/objects/" + file_hash;
+        if (fs::exists(object_path)) {
+            // Extract the parent path safety string checkpoint
+            fs::path parent_dir = fs::path(filepath).parent_path();
+            
+            // 🔥 CRITICAL PROTECTION: Only create directories if the file is inside subfolders!
+            if (!parent_dir.empty() && parent_dir != "." && parent_dir != "") {
+                fs::create_directories(parent_dir);
+            }
+            
+            // Overwrite target file layout cleanly with database content stream
+            std::ifstream src(object_path, std::ios::binary);
+            std::ofstream dest(filepath, std::ios::binary | std::ios::trunc);
+            dest << src.rdbuf();
+        }
+    }
+    
+    // Clear and close the file stream reader before resetting position bounds
+    tree_file.close();
+
+    // 2. 🔥 SYNCHRONIZE STAGING INDEX AREA (Keep this at the bottom!)
+    std::ofstream index_sync(".voxel/index", std::ios::trunc);
+    std::ifstream tree_sync(tree_path);
+    if (tree_sync.is_open() && index_sync.is_open()) {
+        index_sync << tree_sync.rdbuf();
+    }
+}
+
+// Main Restore Command Engine Processing Matrix
+void Commands::restore_workspace_state(const std::string& target_expr) {
+    auto [genesis, repo_map] = build_complete_repo_graph();
+    if (genesis.empty()) {
+        std::cout << "\033[33mNo historical records to target time-travel states into.\033[0m\n";
+        return;
+    }
+
+    std::string working_expr = target_expr;
+    // Sanitize input string spacing structures
+    working_expr.erase(std::remove_if(working_expr.begin(), working_expr.end(), ::isspace), working_expr.end());
+
+    std::string identifier = working_expr;
+    int step_back = 0;
+
+    // Check for negative step modifications like branch-3 or hash-3
+    size_t dash_pos = working_expr.find('-');
+    if (dash_pos != std::string::npos) {
+        identifier = working_expr.substr(0, dash_pos);
+        try {
+            step_back = std::stoi(working_expr.substr(dash_pos + 1));
+        } catch (...) {
+            std::cerr << "\033[31mError: Invalid timeline fallback metric signature formatting.\033[0m\n";
+            return;
+        }
+    }
+
+    std::string starting_hash = "";
+
+    // 1. Resolve Expression Identifier Root Coordinates
+    if (identifier.empty()) {
+        // Fallback option: Get immediate previous commit relative to active HEAD position pointer leaf
+        std::string current_br = get_current_branch_name();
+        std::string br_file = ".voxel/refs/heads/" + current_br;
+        if (fs::exists(br_file)) {
+            std::string current_hash = FileSystem::read_file_to_string(br_file);
+            current_hash.erase(std::remove_if(current_hash.begin(), current_hash.end(), ::isspace), current_hash.end());
+            if (repo_map.count(current_hash)) {
+                starting_hash = repo_map[current_hash].parent; // Move back exactly 1 step by default
+            }
+        }
+    } 
+    else if (identifier == "head" || identifier == "HEAD") {
+        // Point straight to the permanent Genesis foundation node configuration anchor block
+        starting_hash = genesis;
+    } 
+    else if (repo_map.count(identifier)) {
+        // Identifier is a valid, raw 64-character hash value signature match entry
+        starting_hash = identifier;
+    } 
+    // Inside Commands::restore_workspace_state() right where you match branches:
+    else {
+        // 🔥 STEP 1: Handle forward slashes if users input structural paths
+        std::string transformed_br = identifier;
+        std::replace(transformed_br.begin(), transformed_br.end(), '/', '@');
+        
+        // 🔥 STEP 2: Handle reverse slashes if users input nested paths backwards (exp2/exp -> exp2@exp)
+        // If the flat file doesn't exist directly, check if inversion matching helps out
+        std::string branch_ref_path = ".voxel/refs/heads/" + transformed_br;
+        
+        if (!fs::exists(branch_ref_path) && identifier.find('/') != std::string::npos) {
+            size_t slash_pos = identifier.find('/');
+            std::string part1 = identifier.substr(0, slash_pos);
+            std::string part2 = identifier.substr(slash_pos + 1);
+            // Re-stitch matching your sharded naming schema format rule: branch2@branch1
+            transformed_br = part2 + "@" + part1;
+            branch_ref_path = ".voxel/refs/heads/" + transformed_br;
+        }
+
+        if (fs::exists(branch_ref_path)) {
+            starting_hash = FileSystem::read_file_to_string(branch_ref_path);
+            starting_hash.erase(std::remove_if(starting_hash.begin(), starting_hash.end(), ::isspace), starting_hash.end());
+        } else {
+            // Backup check: standard hash prefix match
+            for (const auto& [hash, node] : repo_map) {
+                if (hash.substr(0, identifier.length()) == identifier) {
+                    starting_hash = hash;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (starting_hash.empty() || !repo_map.count(starting_hash)) {
+        std::cerr << "\033[31mError: Specified timeline position target expression could not be located.\033[0m\n";
+        return;
+    }
+
+    // 2. Traversal Loop: Step backwards down the chain through parent nodes
+    std::string current_target = starting_hash;
+    for (int i = 0; i < step_back; ++i) {
+        std::string parent_ptr = repo_map[current_target].parent;
+        // Cease execution processing if parent field terminates to Genesis boundary markers
+        if (parent_ptr == std::string(64, '0') || parent_ptr.empty() || parent_ptr.find_first_not_of('0') == std::string::npos) {
+            current_target = genesis; // Cap layout fallback constraint boundaries smoothly
+            break;
+        }
+        current_target = parent_ptr;
+    }
+
+    // 3. Finalize: Extract the root tree map and run checkout file reconstruction
+    CommitNode target_node = repo_map[current_target];
+    
+    // Parse tree string signature out of raw object serialization maps
+    std::string target_tree_hash = "";
+    std::string obj_file_content = FileSystem::read_file_to_string(".voxel/objects/" + current_target);
+    std::stringstream file_ss(obj_file_content);
+    std::string line;
+    while (std::getline(file_ss, line)) {
+        if (line.rfind("tree - ", 0) == 0) {
+            target_tree_hash = line.substr(7);
+            target_tree_hash.erase(std::remove_if(target_tree_hash.begin(), target_tree_hash.end(), ::isspace), target_tree_hash.end());
+            break;
+        }
+    }
+
+    if (target_tree_hash.empty()) {
+        std::cerr << "\033[31mError: Structural file blueprint index corrupted on target node.\033[0m\n";
+        return;
+    }
+
+    std::cout << "\033[36mTime traveling workspace backward to target node checkpoint...\033[0m\n";
+    checkout_files_from_tree(target_tree_hash);
+
+    // Update active reference tracks safely to prevent split layout detached state conflicts
+    if (target_expr.find('-') == std::string::npos && !target_expr.empty() && target_expr != "head" && target_expr != "HEAD") {
+        std::string target_br_clean = target_expr;
+        std::replace(target_br_clean.begin(), target_br_clean.end(), '/', '@');
+        if (fs::exists(".voxel/refs/heads/" + target_br_clean)) {
+            std::ofstream head_update(".voxel/HEAD", std::ios::trunc);
+            head_update << "ref: refs/heads/" << target_br_clean << "\n";
+            head_update.close();
+        }
+    }
+
+    std::cout << "\033[32m✔ Success! Working tree restored to state node: [" << current_target.substr(0, 8) << "]\033[0m\n";
+    std::cout << "  Message context reference: \"" << target_node.message << "\"\n";
+}
 
     
 

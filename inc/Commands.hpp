@@ -26,10 +26,12 @@ public:
     static void display_basic_log();
     static void display_graph_log();
     static void export_repository_pdf();
+    static void restore_workspace_state(const std::string& target_expr);
 
 
 private:
     static std::pair<std::string, std::map<std::string, CommitNode>> build_complete_repo_graph();
+    static void checkout_files_from_tree(const std::string& tree_hash);
 
 };
 
