@@ -72,7 +72,7 @@ std::vector<std::string> FileSystem::list_workspace_files()
 
                 // 🔒 SAFE PROTECTION: Exact match for the binary, substring match for garbage artifacts
                 if (path_str == "voxel" || path_str == "./voxel" || path_str == ".voxelignore" ||
-                    path_str.find(".DS_Store") != std::string::npos || file_ext == ".env"){
+                    path_str.find(".DS_Store") != std::string::npos || path_str == ".env"){
                     continue;
                 }
                 if (user_ignores.count(item_name) || 

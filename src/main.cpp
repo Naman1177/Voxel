@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
         }
 
         Commands::commit_changes(message);
-        
+        Commands::clear_snapshot_silent();
     }
     else if (command == "where")
     {
@@ -165,6 +165,8 @@ int main(int argc, char *argv[])
             expression = argv[2]; // Capture options like: exp2/exp-3, head, or a hash
         }
         Commands::restore_workspace_state(expression);
+        Commands::clear_snapshot_silent();
+        Commands::create_snapshot();
     }
     else if(command == "snapshot"){
         Commands::create_snapshot();
@@ -172,7 +174,10 @@ int main(int argc, char *argv[])
     else if(command == "snapback"){
         Commands::restore_snapshot();
     }
-    
+    else if(command == "snapclear"){
+        Commands::clear_snapshot_silent();
+        cout << "\033[1;32m Last Snapshot cleared successfully. You may now make another snapshot.\033[0m\n";
+    }
     
     
     
