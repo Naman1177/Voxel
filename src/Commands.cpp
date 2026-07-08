@@ -568,8 +568,6 @@ void Commands::checkout_files_from_tree(const std::string& tree_hash) {
         index_sync << tree_sync.rdbuf();
     }
 }
-
-// Main Restore Command Engine Processing Matrix
 void Commands::restore_workspace_state(const std::string& target_expr) {
     auto [genesis, repo_map] = build_complete_repo_graph();
     if (genesis.empty()) {
@@ -694,22 +692,136 @@ void Commands::restore_workspace_state(const std::string& target_expr) {
     checkout_files_from_tree(target_tree_hash);
 
     // Update active reference tracks safely to prevent split layout detached state conflicts
-    if (target_expr.find('-') == std::string::npos && !target_expr.empty() && target_expr != "head" && target_expr != "HEAD") {
-        std::string target_br_clean = target_expr;
-        std::replace(target_br_clean.begin(), target_br_clean.end(), '/', '@');
-        if (fs::exists(".voxel/refs/heads/" + target_br_clean)) {
-            std::ofstream head_update(".voxel/HEAD", std::ios::trunc);
-            head_update << "ref: refs/heads/" << target_br_clean << "\n";
-            head_update.close();
-        }
-    }
 
     std::cout << "\033[32m✔ Success! Working tree restored to state node: [" << current_target.substr(0, 8) << "]\033[0m\n";
     std::cout << "  Message context reference: \"" << target_node.message << "\"\n";
 }
 
-    
+bool Commands::is_snapshot_empty() {
+    string snapshot_dir = ".voxel/snapshot";
+    if (!fs::exists(snapshot_dir)) {
+        cout << "\033[36mError: Snapshots directory not found. Run 'voxel init' to initialize the repository.\033[0m\n";
+    }
+    return fs::directory_iterator(snapshot_dir) == fs::directory_iterator();
 
+}   
+bool Commands::should_ignore_extension(const string& ext){
+    string clean_ext = ext;
+    transform(clean_ext.begin(), clean_ext.end(), clean_ext.begin(), ::tolower);
+    static const std::vector<std::string> ignored_formats = {
+        ".mp4", ".mp3", ".blender", ".jpeg", ".jpg", ".png", ".gif", ".mov", ".wav"
+    };
+    return std::find(ignored_formats.begin(), ignored_formats.end(), clean_ext) != ignored_formats.end();
+}
+
+void Commands::restore_snapshot() {
+    std::string snap_root = ".voxel/snapshot";
+    std::string manifest_path = snap_root + "/snapshot_index";
+
+    if (!fs::exists(manifest_path) || is_snapshot_empty()) {
+        std::cout << "\033[33mNo active snapshots found to roll back into.\033[0m\n";
+        return;
+    }
+
+    std::ifstream manifest(manifest_path);
+    std::string line;
+
+    std::cout << "\033[36mRolling back to snapshot checkpoint. Restoring raw states...\033[0m\n";
+
+    while (std::getline(manifest, line)) {
+        if (line.empty()) continue;
+        std::stringstream ss(line);
+        std::string original_filepath, file_hash;
+        ss >> original_filepath >> file_hash;
+
+        fs::path orig_path(original_filepath);
+        fs::path snap_file_path = fs::path(snap_root) / orig_path.parent_path() / file_hash;
+
+        if (fs::exists(snap_file_path)) {
+            fs::path orig_parent = orig_path.parent_path();
+            if (!orig_parent.empty() && orig_parent != "." && orig_parent != "") {
+                fs::create_directories(orig_parent);
+            }
+
+            std::ifstream src(snap_file_path, std::ios::binary);
+            std::ofstream dest(original_filepath, std::ios::binary | std::ios::trunc);
+            dest << src.rdbuf();
+        }
+    }
+    manifest.close();
+
+    // WIPE SCRATCHPAD CLEAN NATIVELY
+    fs::remove_all(snap_root);
+    fs::create_directories(snap_root); 
+
+    std::cout << "\033[32m✔ Workspace restored. Snapshot scratchpad wiped clean.\033[0m\n";
+}
+
+void Commands::create_snapshot() {
+    std::string snap_root = ".voxel/snapshot";
+    
+    // 🔒 SINGLE-SLOT CONSTRAINT GUARD
+    if (!is_snapshot_empty()) {
+        std::cerr << "\033[31mError: An active snapshot already exists.\033[0m\n";
+        std::cerr << "You must run '\033[33mvoxel snapback\033[0m' first to clear the last state data.\n";
+        return;
+    }
+
+    if (!fs::exists(snap_root)) {
+        std::cerr << "\033[31mError: Snapshots directory not found. Run 'voxel init' to initialize the repository.\033[0m\n";
+        return;
+    }
+    std::ofstream manifest(snap_root + "/snapshot_index", std::ios::trunc);
+    if (!manifest.is_open()) {
+        std::cerr << "Error: Failed to initialize snapshot index ledger.\n";
+        return;
+    }
+
+    // 🔄 Securely fetch pre-filtered files (Zero risk of catching 'voxel' or '.git')
+    std::vector<std::string> workspace_files = FileSystem::list_workspace_files();
+
+    std::cout << "\033[36mGenerating high-speed workspace shadow snapshot...\033[0m\n";
+
+    for (const auto& relative_path : workspace_files) {
+        fs::path file_path(relative_path);
+        
+        if (should_ignore_extension(file_path.extension().string())) {
+            continue;
+        }
+
+        std::string file_hash = Hashing::generate_sha256(relative_path); 
+        
+        fs::path parent_snap_dir = fs::path(snap_root) / file_path.parent_path();
+        if (!parent_snap_dir.empty() && parent_snap_dir != snap_root) {
+            fs::create_directories(parent_snap_dir);
+        }
+
+        fs::path snap_target_file = parent_snap_dir / file_hash;
+
+        std::ifstream src(relative_path, std::ios::binary);
+        std::ofstream dest(snap_target_file, std::ios::binary | std::ios::trunc);
+        if (src.is_open() && dest.is_open()) {
+            dest << src.rdbuf();
+            manifest << relative_path << " " << file_hash << "\n";
+        }
+    }
+
+    manifest.close();
+    std::cout << "\033[32m✔ Snapshot successfully saved. Slot locked. You may try anything with workspace.\033[0m\n";
+}
+
+
+
+void Commands::clear_snapshot_silent() {
+    std::string snap_root = ".voxel/snapshot";
+    
+    
+    if (!fs::exists(snap_root) || is_snapshot_empty()) {
+        return; 
+    }
+    fs::remove_all(snap_root);
+    fs::create_directories(snap_root);
+}
 
 
 

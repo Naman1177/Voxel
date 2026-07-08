@@ -1,0 +1,7 @@
+# =========================================================================
+#                   VOXEL VERSION CONTROL IGNORE SYSTEM                    
+# =========================================================================
+# Lines starting with '#' are comments and are ignored logically.
+# You can ignore raw folder names, exact paths, or file extensions.
+
+hi.py

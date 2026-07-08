@@ -95,6 +95,7 @@ int main(int argc, char *argv[])
         }
 
         Commands::commit_changes(message);
+        
     }
     else if (command == "where")
     {
@@ -165,6 +166,18 @@ int main(int argc, char *argv[])
         }
         Commands::restore_workspace_state(expression);
     }
+    else if(command == "snapshot"){
+        Commands::create_snapshot();
+    }
+    else if(command == "snapback"){
+        Commands::restore_snapshot();
+    }
+    
+    
+    
+    
+    
+    
     
     
     else

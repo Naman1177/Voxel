@@ -27,11 +27,16 @@ public:
     static void display_graph_log();
     static void export_repository_pdf();
     static void restore_workspace_state(const std::string& target_expr);
+    static void create_snapshot();
+    static void restore_snapshot();
+    static void clear_snapshot_silent();
 
 
 private:
     static std::pair<std::string, std::map<std::string, CommitNode>> build_complete_repo_graph();
     static void checkout_files_from_tree(const std::string& tree_hash);
+    static bool is_snapshot_empty();
+    static bool should_ignore_extension(const std::string& ext);
 
 };
 

@@ -5,7 +5,7 @@
 *.obj
 *.d
 .vscode/
-
+.voxel/
 
 # ==========================================
 # Executable Binaries (Universal)
