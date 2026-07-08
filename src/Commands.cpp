@@ -986,13 +986,25 @@ void Commands::clear_snapshot_silent()
     fs::remove_all(snap_root);
     fs::create_directories(snap_root);
 }
-
 bool Commands::should_ignore_extension(const string &ext)
 {
     string clean_ext = ext;
     transform(clean_ext.begin(), clean_ext.end(), clean_ext.begin(), ::tolower);
     static const std::vector<std::string> ignored_formats = {
-        ".mp4", ".mp3", ".blender", ".jpeg", ".jpg", ".png", ".gif", ".mov", ".wav"};
+        ".mp4", ".mov", ".avi", ".mkv", ".flv", ".m4v", ".webm",
+        
+        // Audio Assets
+        ".mp3", ".wav", ".flac", ".ogg", ".aac", ".m4a",
+        
+        // Images & Graphics
+        ".jpg", ".jpeg", ".png", ".gif", ".tiff", ".bmp", ".heic", ".ico", ".webp",
+        
+        // 3D Models & Project Layouts
+        ".blend", ".blender", ".fbx", ".obj", ".stl", ".dae", ".3ds", ".glb", ".gltf", ".psd",
+        
+        // Compressed Archives
+        ".zip", ".rar", ".7z",".pdf"};
     return std::find(ignored_formats.begin(), ignored_formats.end(), clean_ext) != ignored_formats.end();
 }
+
 
