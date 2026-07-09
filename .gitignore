@@ -23,17 +23,8 @@
 # Test Folder Exceptions
 # ==========================================
 # 1. Ignore ALL files inside the tests folder by default
-tests/**/*
+test/
 
-# 2. ALLOW Git to track your C/C++ source and header files
-!tests/**/*.cpp
-!tests/**/*.c
-!tests/**/*.h
-!tests/**/*.hpp
 
-# ==========================================
-# Temporary Test Sandboxes
-# ==========================================
-# Blocks any runtime repositories created while testing commands
-tests/sandbox/
-tests/tmp/
+
+
