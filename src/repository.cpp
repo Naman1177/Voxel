@@ -2,6 +2,7 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include "ai.hpp"
 
 namespace fs = std::filesystem;
 
@@ -40,12 +41,13 @@ bool Repository::init_repository(){
                             
                            
                 default_ignore.close();
-                std::cout << "\033[36m Generated default template settings rules inside .voxelignore\033[0m\n";
+                std::cout << "\033[36mGenerated default template settings rules inside .voxelignore\033[0m\n";
             }
          
         }
 
         std::cout << "\033[32mInitialized empty Voxel repository inside .voxel/\033[0m\n";
+        bool config_status = ai::create_default_config();
         return true;
     }
     catch (const fs::filesystem_error& e) {

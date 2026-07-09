@@ -30,9 +30,14 @@ int main(int argc, char *argv[])
     }
 
     string command = argv[1];
-    if (command == "init")
-    {
-        Repository::init_repository();
+    if (command == "init"){
+        
+        if(argc == 3 && std::string(argv[2]) == "ai"){
+            ai::init_ai();
+        }
+        else if(argc == 2){
+            Repository::init_repository();
+        }
     }
     else if (command == "status")
     { // 2. Add a status option to test file printing
@@ -180,9 +185,7 @@ int main(int argc, char *argv[])
         cout << "\033[1;32m Last Snapshot cleared successfully. You may now make another snapshot.\033[0m\n";
     }
     
-    
-    
-    
+
     
     
     
