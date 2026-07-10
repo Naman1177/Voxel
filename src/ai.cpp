@@ -76,6 +76,7 @@ bool ai::init_ai() {
     std::cout << "\033[1;36m----------Upgrading Voxel Environment with AI Services----------\033[0m\n";
         
     VoxelConfig active_config;
+    fs::create_directories(".voxel/ai");
         
         
     if (!load_config(active_config)) {
@@ -103,4 +104,146 @@ bool ai::init_ai() {
     }
     return false;
 }
+
+ai::sendToAI::sendToAI() {
+    is_ready = ai::load_config(config);
+}
+
+string ai::sendToAI::escape_json(const string& raw_input){
+    stringstream ss;
+    for (char ch : raw_input) {
+        switch (ch) {
+        case '\\': ss << "\\\\"; break;
+        case '"':  ss << "\\\""; break;
+        case '\b': ss << "\\b"; break;
+        case '\f': ss << "\\f"; break;
+        case '\n': ss << "\\n"; break;
+        case '\r': ss << "\\r"; break;
+        case '\t': ss << "\\t"; break;
+        default:   ss << ch; break;
+        }
+    }
+    return ss.str();
+
+}
+
+string ai::sendToAI::transmit(const string& url, const string& headers, const string& json_body) {
+    if(!fs::exists(".voxel")){
+        cout << "\033[31m[Error] Cannot transmit data. Repository not initialized Run 'voxel init' first.\033[0m\n";
+        return "";
+    }
+    string out_cache = ".voxel/ai/netpayload.json";
+    string in_cache = ".voxel/ai/netresponse.json";
+    ofstream writer(out_cache,ios::out|ios::trunc);
+    if (!writer.is_open()) return "Error: Disk caching arrays inaccessible.";
+    writer << json_body;
+    writer.close();
+    string command = "curl -s -X POST \"" + url + "\" " + headers + " -d @" + out_cache + " > " + in_cache;
+    int code = std::system(command.c_str());
+    if (code != 0) {
+        fs::remove(out_cache);
+        return "Error: Transmission failed with code ,Check your network connection.";
+    }
+    ifstream reader(in_cache);
+    if (!reader.is_open()) return "Error: System stream terminated prematurely.";
+    stringstream buffer;
+    buffer << reader.rdbuf();
+    reader.close();
+
+    fs::remove(out_cache);
+    fs::remove(in_cache);
+    return buffer.str();
+    
+
+}
+string ai::sendToAI::clean_json_response(const string& raw_json, const string& key_token) {
+    size_t start = raw_json.find(key_token);
+    if (start == string::npos) {return "";}
+    start += key_token.length();
+    size_t end = raw_json.find("\"", start);
+    if (end == string::npos) return "";
+
+    string parsed = raw_json.substr(start, end - start);
+    size_t marker = 0;
+    while ((marker = parsed.find("\\n", marker)) != string::npos) {
+        parsed.replace(marker, 2, "\n");
+        marker += 1;
+    }
+    return parsed;
+}
+string ai::sendToAI::run_gemini(const string& sys, const string& content) {
+    string url = "https://generativelanguage.googleapis.com/v1beta/models/" + config.model + ":generateContent?key=" + config.api_key;
+    string headers = "-H \"Content-Type: application/json\"";
+    string body = "{\"contents\":[{\"parts\":[{\"text\":\"" + escape_json(sys) + "\\n\\n" + escape_json(content) + "\"}]}]}";
+    
+    string output = transmit(url, headers, body);
+    string parsed = clean_json_response(output, "\"text\": \"");
+    return parsed.empty() ? "Gemini Execution Failure Payload:\n" + output : parsed;
+}
+string ai::sendToAI::run_openai(const string& sys, const string& content) {
+    string url = "https://api.openai.com/v1/chat/completions";
+    string headers = "-H \"Content-Type: application/json\" -H \"Authorization: Bearer " + config.api_key + "\"";
+    string body = "{\"model\":\"" + config.model + "\",\"messages\":["
+                  "{\"role\":\"system\",\"content\":\"" + escape_json(sys) + "\"},"
+                  "{\"role\":\"user\",\"content\":\"" + escape_json(content) + "\"}]}";
+                  
+    string output = transmit(url, headers, body);
+    string parsed = clean_json_response(output, "\"content\":\"");
+    return parsed.empty() ? "OpenAI Execution Failure Payload:\n" + output : parsed;
+}
+string ai::sendToAI::run_claude(const string& sys, const string& content) {
+    string url = "https://api.anthropic.com/v1/messages";
+    string headers = "-H \"Content-Type: application/json\" -H \"x-api-key: " + config.api_key + "\" -H \"anthropic-version: 2023-06-01\"";
+    string body = "{\"model\":\"" + config.model + "\",\"system\":\"" + escape_json(sys) + "\",\"messages\":["
+                  "{\"role\":\"user\",\"content\":\"" + escape_json(content) + "\"}]}";
+                  
+    string output = transmit(url, headers, body);
+    string parsed = clean_json_response(output, "\"text\": \"");
+    return parsed.empty() ? "Claude Execution Failure Payload:\n" + output : parsed;
+}
+string ai::sendToAI::run_ollama(const string& sys, const string& content) {
+    string url = "http://localhost:11434/api/generate";
+    string headers = "-H \"Content-Type: application/json\"";
+    string body = "{\"model\":\"" + config.model + "\",\"system\":\"" + escape_json(sys) + "\",\"prompt\":\"" + escape_json(content) + "\",\"stream\":false}";
+    
+    string output = transmit(url, headers, body);
+    string parsed = clean_json_response(output, "\"response\":\"");
+    return parsed.empty() ? "Ollama Execution Failure Payload:\n" + output : parsed;
+}
+string ai::sendToAI::run_groq(const string& sys, const string& content) {
+    string url = "https://api.groq.com/openai/v1/chat/completions";
+    string headers = "-H \"Content-Type: application/json\" -H \"Authorization: Bearer " + config.api_key + "\"";
+    string body = "{\"model\":\"" + config.model + "\",\"messages\":["
+                  "{\"role\":\"system\",\"content\":\"" + escape_json(sys) + "\"},"
+                  "{\"role\":\"user\",\"content\":\"" + escape_json(content) + "\"}]}";
+                  
+    string output = transmit(url, headers, body);
+    string parsed = clean_json_response(output, "\"content\":\"");
+    return parsed.empty() ? "Groq Execution Failure Payload:\n" + output : parsed;
+}
+string ai::sendToAI::run_deepseek(const string& sys, const string& content) {
+    string url = "https://api.deepseek.com/chat/completions";
+    string headers = "-H \"Content-Type: application/json\" -H \"Authorization: Bearer " + config.api_key + "\"";
+    string body = "{\"model\":\"" + config.model + "\",\"messages\":["
+                  "{\"role\":\"system\",\"content\":\"" + escape_json(sys) + "\"},"
+                  "{\"role\":\"user\",\"content\":\"" + escape_json(content) + "\"}]}";
+                  
+    string output = transmit(url, headers, body);
+    string parsed = clean_json_response(output, "\"content\":\"");
+    return parsed.empty() ? "DeepSeek Execution Failure Payload:\n" + output : parsed;
+}
+string ai::sendToAI::execute(const string& system_prompt, const string& content) {
+    if (!is_ready || config.is_connected != "true") {
+        return "Error: Subsystem missing parameters. Run 'voxel login'.";
+    }
+    if (config.provider == "gemini")   return run_gemini(system_prompt, content);
+    if (config.provider == "openai")   return run_openai(system_prompt, content);
+    if (config.provider == "claude")   return run_claude(system_prompt, content);
+    if (config.provider == "ollama")   return run_ollama(system_prompt, content);
+    if (config.provider == "groq")     return run_groq(system_prompt, content);
+    if (config.provider == "deepseek") return run_deepseek(system_prompt, content);
+    return "Error: Unknown provider specified in configuration. Run 'voxel login' to reset.";
+}
+
+
 

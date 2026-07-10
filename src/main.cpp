@@ -183,7 +183,27 @@ int main(int argc, char *argv[])
         ai::init_ai();
     }
 
-    
+    else if (command == "test-ai") {
+        std::cout << "\033[1;35m🚀 Waking up Voxel AI Orchestrator Integration...\033[0m\n";
+        
+        // 1. Instantiate your nested inner class engine
+        ai::sendToAI ai_engine;
+
+        // 2. Set up a simple, distinct prompt signature
+        std::string system_instruction = "You are a helpful CLI validation assistant. Keep responses ultra-short.";
+        std::string user_payload = "Say the words 'Voxel Subsystem Online!' followed by a random emoji.";
+
+        std::cout << "📡 Transmitting handshake payload to cloud gateway...\n";
+        
+        // 3. Execute the polymorphic transmission loop
+        std::string response = ai_engine.execute(system_instruction, user_payload);
+
+        // 4. Output results directly to the developer terminal
+        std::cout << "-------------------------------------------------------\n";
+        std::cout << "\033[1;32m🤖 Response Captured:\033[0m\n";
+        std::cout << response << "\n";
+        std::cout << "-------------------------------------------------------\n";
+    }
     
     
     else
