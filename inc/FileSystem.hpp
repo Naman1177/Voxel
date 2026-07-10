@@ -10,6 +10,7 @@ public:
     static std::vector<std::string> list_workspace_files();
     static std::string read_file_to_string(const std::string& path);
     static std::unordered_map<std::string, std::string> read_index();
+    static std::string get_current_active_file();
 
 };
 

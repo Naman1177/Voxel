@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <Commands.hpp>
 using namespace std;
 namespace fs = std::filesystem;
 const string CONFIG_PATH = ".voxel/config";
@@ -32,7 +33,6 @@ bool ai::save_config(const VoxelConfig& config) {
         
     return true;
 }
-
 bool ai::load_config(VoxelConfig& config) {
     std::ifstream file(CONFIG_PATH);
     if (!file.is_open()) {
@@ -55,8 +55,6 @@ bool ai::load_config(VoxelConfig& config) {
     }
     return true;
 }
-
-    
 bool ai::create_default_config() {
     VoxelConfig default_config;
         
@@ -69,9 +67,7 @@ bool ai::create_default_config() {
     default_config.is_connected = "false";
 
     return save_config(default_config);
-}
-
-   
+} 
 bool ai::init_ai() {
     std::cout << "\033[1;36m----------Upgrading Voxel Environment with AI Services----------\033[0m\n";
         
@@ -104,11 +100,9 @@ bool ai::init_ai() {
     }
     return false;
 }
-
 ai::sendToAI::sendToAI() {
     is_ready = ai::load_config(config);
 }
-
 string ai::sendToAI::escape_json(const string& raw_input){
     stringstream ss;
     for (char ch : raw_input) {
@@ -126,7 +120,6 @@ string ai::sendToAI::escape_json(const string& raw_input){
     return ss.str();
 
 }
-
 string ai::sendToAI::transmit(const string& url, const string& headers, const string& json_body) {
     if(!fs::exists(".voxel")){
         cout << "\033[31m[Error] Cannot transmit data. Repository not initialized Run 'voxel init' first.\033[0m\n";
@@ -158,17 +151,68 @@ string ai::sendToAI::transmit(const string& url, const string& headers, const st
 }
 string ai::sendToAI::clean_json_response(const string& raw_json, const string& key_token) {
     size_t start = raw_json.find(key_token);
-    if (start == string::npos) {return "";}
+    if (start == string::npos) return "";
     start += key_token.length();
-    size_t end = raw_json.find("\"", start);
-    if (end == string::npos) return "";
+
+    // 🌟 THE FIX: Smart search that ignores escaped quotes!
+    size_t end = start;
+    while (end < raw_json.length()) {
+        if (raw_json[end] == '"') {
+            // Check if the quote is escaped by a backslash
+            if (end > 0 && raw_json[end - 1] == '\\') {
+                // Keep going! It's just an escaped quote inside the code.
+                end++;
+            } else {
+                // True unescaped quote found. This is the real end of the JSON string.
+                break;
+            }
+        } else {
+            end++;
+        }
+    }
+
+    if (end == raw_json.length()) return "";
 
     string parsed = raw_json.substr(start, end - start);
+    
+    // Clean up all escaped characters back to normal C++/Python formatting
     size_t marker = 0;
     while ((marker = parsed.find("\\n", marker)) != string::npos) {
-        parsed.replace(marker, 2, "\n");
+        parsed.replace(marker, 2, "\n"); 
         marker += 1;
     }
+    marker = 0;
+    while ((marker = parsed.find("\\\"", marker)) != string::npos) {
+        parsed.replace(marker, 2, "\""); 
+        marker += 1;
+    }
+    marker = 0;
+    while ((marker = parsed.find("\\t", marker)) != string::npos) {
+        parsed.replace(marker, 2, "\t"); 
+        marker += 1;
+    }
+    marker = 0;
+    while ((marker = parsed.find("\\\\", marker)) != string::npos) {
+        parsed.replace(marker, 2, "\\"); 
+        marker += 1;
+    }
+    marker = 0;
+    while ((marker = parsed.find("\\u003c", marker)) != string::npos) {
+        parsed.replace(marker, 6, "<"); marker += 1;
+    }
+    marker = 0;
+    while ((marker = parsed.find("\\u003e", marker)) != string::npos) {
+        parsed.replace(marker, 6, ">"); marker += 1;
+    }
+    marker = 0;
+    while ((marker = parsed.find("\\u0026", marker)) != string::npos) {
+        parsed.replace(marker, 6, "&"); marker += 1;
+    }
+    marker = 0;
+    while ((marker = parsed.find("\\u0027", marker)) != string::npos) {
+        parsed.replace(marker, 6, "'"); marker += 1;
+    }
+    
     return parsed;
 }
 string ai::sendToAI::run_gemini(const string& sys, const string& content) {
@@ -244,6 +288,77 @@ string ai::sendToAI::execute(const string& system_prompt, const string& content)
     if (config.provider == "deepseek") return run_deepseek(system_prompt, content);
     return "Error: Unknown provider specified in configuration. Run 'voxel login' to reset.";
 }
+void ai::execute_voxel_review(const std::vector<std::string>& files_to_review, const std::string& optional_note) {
+    if(files_to_review.empty()) {
+        cout << "\033[1;33m[Notice] No files specified for review. Please provide file paths.\033[0m\n";
+        return;
+    }
+    ai::sendToAI ai_agent;
+    string fixed_prompt = "You are an elite software auditor. Scan the code for bugs, security flaws, and performance leaks.Specify the exact line number, explain the issue simply, and provide a clean code block demonstrating the fix.Tell the person how to fix this code in a simple way. If the code is perfect, say 'No issues found.' ";
+    bool snapshot_created = false;
+    for (const string& filename : files_to_review){
+        ifstream infile(filename);
+        if (!infile.is_open()) {
+            cout << "\033[1;31m[Error] Cannot open file: " << filename << "\033[0m\n";
+            continue;
+        }
+        stringstream buffer;
+        buffer << infile.rdbuf();
+        infile.close();
+        string file_content = buffer.str();
+        if (file_content.empty()) continue;
+        string content_payload = file_content;
+        if (!optional_note.empty()) {
+            content_payload = " Developer Context Note: \"" + optional_note + "\"\n\nTarget Code Matrix:\n" + file_content;
+        }
+        cout << "\n\033[1;34mVoxel AI is auditing " << filename << "...\033[0m\n";
+        cout << "-------------------------------------------------------\n";
+        cout << ai_agent.execute(fixed_prompt, content_payload) << "\n";
+        cout << "-------------------------------------------------------\n";
+        cout << "\033[1;33mWould you like Voxel Agent to automatically apply these fixes to " << filename << "? (yes/no): \033[0m";
+        string choice;
+        cin >> choice;
+        if(choice == "yes" || choice == "y" || choice == "Y" || choice == "Yes"  || choice == "YES"){
+            if (!snapshot_created) {
+                Commands::clear_snapshot_silent();
+                Commands::create_snapshot();
+                snapshot_created = true;
+            }
+            string agent_prompt = 
+            "You are a precise automated refactoring engine. Rewrite the provided source code to fix the audited issues. "
+            "You must return ONLY the raw, complete, updated source code text. Do NOT wrap your answer in markdown code blocks "
+             "(no ```cpp or ```), do NOT include introductory pleasantries, and do NOT explain changes. Your entire response "
+            "must be valid, compilable code matching the original file.";
+            string fixed_code = ai_agent.execute(agent_prompt, content_payload);
+            if (!fixed_code.empty() && fixed_code.find("Error:") == string::npos){
+                ofstream outfile(filename, ios::out | ios::trunc);
+                if (outfile.is_open()) {
+                    outfile << fixed_code;
+                    outfile.close();
+                    cout << "\033[1;32mSuccess! " << filename << " optimized and updated by Voxel AI Agent.\033[0m\n";
+                    cout << "\033[1;33mA snapshot of the previous state before ai changed the file has been created. Use 'voxel snapback' to revert if needed.\033[0m\n";
+                }
+                else{
+                    cout << "\033[1;31mError: Failed to commit update vector to disk.\033[0m\n";
+                }
+            }
+            else{
+                cout << "\033[1;31mError: AI Engine failed to generate stable refactoring stream.\033[0m\n";
+            }
+        }
+        else {
+            cout << "Review complete. File left unchanged.\n";
+        }
+        
+        cout << "-------------------------------------------------------\n";
 
 
+    }
+
+
+
+
+
+}
+    
 

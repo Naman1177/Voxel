@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 namespace fs = std::filesystem;
+using namespace std;
 std::unordered_set<std::string> load_voxelignore() {
     std::unordered_set<std::string> ignore_set;
     std::string ignore_file_path = ".voxelignore";
@@ -126,3 +127,32 @@ std::unordered_map<std::string, std::string> FileSystem::read_index()
     index_file.close();
     return index_map;
 }
+
+string FileSystem::get_current_active_file(){
+    string latest_path = "";
+    auto latest_time = fs::file_time_type::min();
+
+    try {
+        for (const auto& entry : fs::recursive_directory_iterator(fs::current_path())) {
+            if (entry.is_regular_file()) {
+            std::string path_str = entry.path().string();
+
+                 
+                if (path_str.find("/.") != std::string::npos || path_str.find("\\.") != std::string::npos) {
+                    continue;
+                }
+                auto write_time = fs::last_write_time(entry);
+                if (write_time > latest_time) {
+                    latest_time = write_time;
+                  latest_path = path_str;
+                }
+            }
+        }
+    } catch (...) {
+        return ""; 
+    }
+    return latest_path;
+    
+}
+
+    

@@ -1,6 +1,7 @@
 #ifndef AI_HPP
 #define AI_HPP
 #include <string>
+#include <vector>
 using namespace std;
 class ai {
 public:
@@ -16,6 +17,7 @@ public:
     static bool save_config(const VoxelConfig& config);
     static bool create_default_config();
     static bool init_ai();
+    static void execute_voxel_review(const std::vector<std::string>& files_to_review, const std::string& optional_note);
 
    class sendToAI {
     private:

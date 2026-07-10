@@ -24,7 +24,7 @@
 # ==========================================
 # 1. Ignore ALL files inside the tests folder by default
 test/
-
+.env
 
 
 

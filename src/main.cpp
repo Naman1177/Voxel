@@ -1,12 +1,15 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <filesystem>
 #include "repository.hpp"
 #include "FileSystem.hpp"
 #include "Hashing.hpp"
 #include "Commands.hpp"
 #include "ai.hpp"
+namespace fs = std::filesystem;
 using namespace std;
+
 
 int main(int argc, char *argv[])
 {
@@ -182,27 +185,43 @@ int main(int argc, char *argv[])
     else if (command == "login") {
         ai::init_ai();
     }
+    else if(command == "review"){
+        vector<string> target;
+        string optional_note = "";
 
-    else if (command == "test-ai") {
-        std::cout << "\033[1;35m🚀 Waking up Voxel AI Orchestrator Integration...\033[0m\n";
+        if (argc == 2){
+            target.push_back(FileSystem::read_file_to_string(FileSystem::get_current_active_file()));
+        }
+        else if (argc == 3){
+            string arg2 = argv[2];
+            if (arg2 == "all") {
+                //target = Commands::get_modified_untracked_files();
+            }
+            else if (fs::exists(arg2)) {
+                target.push_back(arg2);
+            }
+            else {
+                target.push_back(FileSystem::read_file_to_string(FileSystem::get_current_active_file()));
+                optional_note = arg2;
+            }
+        }
+        else if(argc == 4){
+            string arg2 = argv[2];
+            string arg3 = argv[3];
+            if (arg2 == "all") {
+                //target = Commands::get_modified_untracked_files();
+            }
+            else if (fs::exists(arg2)) {
+                target.push_back(arg2);
+            }
+            else {
+                std::cout << "Error: Target file '" << arg2 << "' not found.\n";
+                return 1;
+            }
+        }
         
-        // 1. Instantiate your nested inner class engine
-        ai::sendToAI ai_engine;
-
-        // 2. Set up a simple, distinct prompt signature
-        std::string system_instruction = "You are a helpful CLI validation assistant. Keep responses ultra-short.";
-        std::string user_payload = "Say the words 'Voxel Subsystem Online!' followed by a random emoji.";
-
-        std::cout << "📡 Transmitting handshake payload to cloud gateway...\n";
-        
-        // 3. Execute the polymorphic transmission loop
-        std::string response = ai_engine.execute(system_instruction, user_payload);
-
-        // 4. Output results directly to the developer terminal
-        std::cout << "-------------------------------------------------------\n";
-        std::cout << "\033[1;32m🤖 Response Captured:\033[0m\n";
-        std::cout << response << "\n";
-        std::cout << "-------------------------------------------------------\n";
+        ai::execute_voxel_review(target, optional_note);
+            
     }
     
     
