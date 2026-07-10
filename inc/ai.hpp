@@ -18,9 +18,6 @@ public:
     static bool init_ai();
 private:
    
-    static bool is_ssh_session();
-    static bool run_local_server(VoxelConfig& config);
-    static void open_browser(const std::string& url);
 
 
 
