@@ -1,5 +1,6 @@
 #include "ai.hpp"
 #include <iostream>
+#include "FileSystem.hpp"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -10,6 +11,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <Commands.hpp>
+#include "Zstd.hpp"
 #include "../third_party_lib/ai_parser/json.hpp"
 using namespace std;
 namespace fs = std::filesystem;
@@ -192,36 +194,58 @@ string ai::sendToAI::transmit(const string &url, const string &headers, const st
     return buffer.str();
 }
 
-static nlohmann::json find_key_recursive(const nlohmann::json& j, const string& key) {
-    if (j.is_object()) {
-        if (j.contains(key)) return j[key];
-        for (auto it = j.begin(); it != j.end(); ++it) {
+static nlohmann::json find_key_recursive(const nlohmann::json &j, const string &key)
+{
+    if (j.is_object())
+    {
+        if (j.contains(key))
+            return j[key];
+        for (auto it = j.begin(); it != j.end(); ++it)
+        {
             nlohmann::json res = find_key_recursive(it.value(), key);
-            if (!res.is_null()) return res;
+            if (!res.is_null())
+                return res;
         }
-    } else if (j.is_array()) {
-        for (const auto& element : j) {
+    }
+    else if (j.is_array())
+    {
+        for (const auto &element : j)
+        {
             nlohmann::json res = find_key_recursive(element, key);
-            if (!res.is_null()) return res;
+            if (!res.is_null())
+                return res;
         }
     }
     return nlohmann::json(); // Return null if not found
 }
-
-
+std::unordered_map<std::string, std::string> parse_tree_content(const std::string &content)
+{
+    std::unordered_map<std::string, std::string> map;
+    std::istringstream stream(content);
+    std::string file_path, hash;
+    while (stream >> file_path >> hash)
+    {
+        map[file_path] = hash;
+    }
+    return map;
+}
 
 string ai::sendToAI::clean_json_response(const string &raw_json, const string &key_token)
 {
     string clean_string = raw_json;
     size_t start = clean_string.find("```json");
-    if (start != string::npos) clean_string.erase(start, 7);
-    else {
+    if (start != string::npos)
+        clean_string.erase(start, 7);
+    else
+    {
         start = clean_string.find("```");
-        if (start != string::npos) clean_string.erase(start, 3);
+        if (start != string::npos)
+            clean_string.erase(start, 3);
     }
-    
+
     size_t end = clean_string.rfind("```");
-    if (end != string::npos) clean_string.erase(end, 3);
+    if (end != string::npos)
+        clean_string.erase(end, 3);
 
     // 2. Aggressively clean the target key (Removes quotes, colons, and spaces)
     // This turns "\"text\": " perfectly into just "text"
@@ -232,23 +256,32 @@ string ai::sendToAI::clean_json_response(const string &raw_json, const string &k
     target_key.erase(std::remove(target_key.begin(), target_key.end(), '\n'), target_key.end());
 
     // 3. Parse and Extract Recursively!
-    try {
+    try
+    {
         nlohmann::json j = nlohmann::json::parse(clean_string);
-        
+
         // Let the recursive function dig through Gemini/OpenAI's massive payloads
         nlohmann::json found_node = find_key_recursive(j, target_key);
 
-        if (!found_node.is_null()) {
-            if (found_node.is_string()) {
+        if (!found_node.is_null())
+        {
+            if (found_node.is_string())
+            {
                 return found_node.get<string>(); // Returns the pure string!
-            } else {
+            }
+            else
+            {
                 return found_node.dump(); // Fallback if the AI returns an array/object
             }
-        } else {
+        }
+        else
+        {
             std::cerr << "\033[1;31m❌ AI returned JSON, but missing key: " << target_key << "\033[0m\n";
             return "";
         }
-    } catch (const nlohmann::json::parse_error& e) {
+    }
+    catch (const nlohmann::json::parse_error &e)
+    {
         std::cerr << "\033[1;31m❌ JSON Parsing Error. AI hallucinated invalid format.\033[0m\n";
         std::cerr << "Exception: " << e.what() << "\n";
         return "";
@@ -425,4 +458,138 @@ void ai::execute_voxel_review(const std::vector<std::string> &files_to_review, c
 
         cout << "-------------------------------------------------------\n";
     }
+}
+void ai::commit_with_ai()
+{
+    cout << "\033[1;36m----------Voxel AI Commit Engine----------\033[0m\n";
+    if (!fs::exists(".voxel/index"))
+    {
+        cout << "\033[1;31mError: No tracked files found. Run 'voxel track' first.\033[0m\n";
+        return;
+    }
+    std::string new_index_content = FileSystem::read_file_to_string(".voxel/index");
+    if (new_index_content.empty())
+    {
+        std::cout << "\033[1;31mError: Tracking area is empty. Nothing to commit.\033[0m\n";
+        return;
+    }
+    unordered_map<std::string, std::string> new_tracked = parse_tree_content(new_index_content);
+    unordered_map<std::string, std::string> old_tracked;
+    string current_branch = Commands::get_current_branch_name();
+    string current_branch_path = ".voxel/refs/heads/" + current_branch;
+    if (fs::exists(current_branch_path))
+    {
+        string parent_hash = FileSystem::read_file_to_string(current_branch_path);
+        if (!parent_hash.empty() && parent_hash != "0000000000000000000000000000000000000000000000000000000000000000")
+        {
+            std::string parent_commit_content = FileSystem::read_file_to_string(".voxel/objects/" + parent_hash);
+            string tree_hash;
+            istringstream commit_stream(parent_commit_content);
+            string line;
+            while (std::getline(commit_stream, line))
+            {
+                if (line.find("tree - ") == 0)
+                {
+                    tree_hash = line.substr(7);
+                    break;
+                }
+            }
+            if (!tree_hash.empty())
+            {
+                std::string old_tree_content = FileSystem::read_file_to_string(".voxel/objects/" + tree_hash);
+                old_tracked = parse_tree_content(old_tree_content);
+            }
+        }
+    }
+    stringstream change_summary;
+    change_summary << "Voxel Branch: " << current_branch << "\n\n";
+    int file_count = 0;
+    for (const auto &[file_path, new_hash] : new_tracked)
+    {
+        string ext = fs::path(file_path).extension().string();
+        if (Commands::should_ignore_extension(ext))
+        {
+            continue;
+        }
+        bool is_new = (old_tracked.find(file_path) == old_tracked.end());
+        bool is_modified = (!is_new && old_tracked[file_path] != new_hash);
+        if (is_new || is_modified)
+        {
+            change_summary << "--- FILE: " << file_path << " (" << (is_new ? "NEW" : "MODIFIED") << ") ---\n";
+
+            if (is_modified)
+            {
+                std::string old_object_path = ".voxel/objects/" + old_tracked[file_path];
+
+                // 1. Define a temporary file path inside your hidden folder
+                std::string temp_path = ".voxel/temp_decompress";
+
+                // 2. Decompress the old object from the vault into the temp file
+                Zstd::decompress_file(old_object_path, temp_path);
+
+                // 3. Read the actual text content from the temp file into your string
+                std::string old_code = FileSystem::read_file_to_string(temp_path);
+
+                // 4. Delete the temp file immediately to keep the workspace clean
+                fs::remove(temp_path);
+
+                change_summary << "[PREVIOUS STATE]\n"<< old_code << "\n";
+            }
+
+            std::string new_code = FileSystem::read_file_to_string(file_path);
+            change_summary << "[CURRENT STATE]\n"
+                           << new_code << "\n\n";
+            file_count++;
+        }
+    }
+    if (file_count == 0)
+    {
+        std::cout << "\033[1;33mNo text/code modifications found to analyze for message generation.\033[0m\n";
+        cout << "\033[1;33mPlease ensure you have tracked files and made changes before using 'voxel commit ai'.\033[0m\n";
+        return;
+    }
+    std::string system_prompt = R"(You are the core logging agent for the Voxel version control engine.
+    Analyze the provided file changes (old vs new state). Write a highly professional, standard conventional commit message.
+    You MUST output ONLY a valid JSON object. Do not wrap it in markdown text blocks.
+    Use this exact schema:
+    {"commit_message": "Brief clear summary of the changes starting with a capital letter"}
+    IMPORTANT: Do NOT use scopes like (example) or (core). Just use the type (e.g., feat, fix, refactor, chore) followed by a colon.)
+    IMPORTANT: Do NOT use Git conventional commit prefixes like "feat:", "fix:", or "chore:". Just write the plain English summary.)";
+    
+    
+    cout << "\033[1;35mAnalyzing compressed object and generating message...\033[0m\n";
+    ai::sendToAI ai_agent;
+    string raw_response = ai_agent.execute(system_prompt, change_summary.str());
+    std::string ai_commit_msg = "";
+    try
+    {
+        std::string clean_json = raw_response;
+        size_t start = clean_json.find("```json");
+        if (start != std::string::npos)
+            clean_json.erase(start, 7);
+        else
+        {
+            start = clean_json.find("```");
+            if (start != std::string::npos)
+                clean_json.erase(start, 3);
+        }
+        size_t end = clean_json.rfind("```");
+        if (end != std::string::npos)
+            clean_json.erase(end, 3);
+
+        nlohmann::json parsed_data = nlohmann::json::parse(clean_json);
+        if (parsed_data.contains("commit_message"))
+        {
+            ai_commit_msg = parsed_data["commit_message"].get<std::string>();
+        }
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "\033[1;31mAI format failure. Using fallback message.\033[0m\n";
+        ai_commit_msg = "chore: automated Voxel engine state update";
+    }
+
+    std::cout << "\033[1;32mVoxel AI drafted message:\033[0m \"" << ai_commit_msg << "\"\n";
+    std::cout << "\033[1;36mHanding off to Voxel commit engine...\033[0m\n";
+    Commands::commit_changes(ai_commit_msg);
 }

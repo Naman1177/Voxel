@@ -71,15 +71,8 @@ void Commands::track_all_files()
         {
             string ext = std::filesystem::path(file).extension().string();
             transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (ext == ".mp4"  || ext == ".blend" || ext == ".png"  || ext == ".jpg"  || 
-                ext == ".jpeg" || ext == ".gif"   || ext == ".tiff" || ext == ".bmp"  || 
-                ext == ".wav"  || ext == ".mp3"   || ext == ".flac" || ext == ".ogg"  || 
-                ext == ".mov"  || ext == ".avi"   || ext == ".mkv"  || ext == ".3ds"  || 
-                ext == ".fbx"  || ext == ".obj"   || ext == ".stl"  || ext == ".dae"  || 
-                ext == ".zip"  || ext == ".rar"   || ext == ".7z"   || ext == ".aac"  || 
-                ext == ".flv"  || ext == ".m4a"   || ext == ".m4v"  || ext == ".webm" || 
-                ext == ".heic" || ext == ".ico"   || ext == ".webp" || ext == ".glb"  || 
-                ext == ".gltf" || ext == ".psd") 
+            
+            if (Commands::should_ignore_extension(ext)) 
             {
                 // Media Assets: Direct binary transfer to vault
                 fs::copy_file(file, object_file_path, fs::copy_options::overwrite_existing);
@@ -953,7 +946,7 @@ void Commands::create_snapshot()
             continue;
         }
 
-        std::string file_hash = Hashing::generate_sha256(relative_path);
+        std::string file_hash = Hashing::generate_sha256(FileSystem::read_file_to_string(relative_path));
 
         fs::path parent_snap_dir = fs::path(snap_root) / file_path.parent_path();
         if (!parent_snap_dir.empty() && parent_snap_dir != snap_root)
@@ -973,7 +966,7 @@ void Commands::create_snapshot()
     }
 
     manifest.close();
-    std::cout << "\033[32m✔ Snapshot successfully saved. Slot locked. You may try anything with workspace.\033[0m\n";
+    std::cout << "\033[32mSnapshot successfully saved. Slot locked. You may try anything with workspace.\033[0m\n";
 }
 void Commands::clear_snapshot_silent()
 {

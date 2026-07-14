@@ -18,6 +18,9 @@ public:
     static bool create_default_config();
     static bool init_ai();
     static void execute_voxel_review(const std::vector<std::string>& files_to_review, const std::string& optional_note);
+    static void commit_with_ai();
+
+
 
    class sendToAI {
     private:

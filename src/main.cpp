@@ -74,8 +74,7 @@ int main(int argc, char *argv[])
             }
         }
     }
-    else if (command == "commit")
-    {
+    else if (command == "commit"){
         std::string message;
 
         if (argc == 2)
@@ -93,9 +92,15 @@ int main(int argc, char *argv[])
             }
         }
 
-        else if (argc >= 3)
-        {
+        else if (argc == 3){
+            if (string(argv[2]) == "ai") {
+                ai::commit_with_ai();
+                return 0;
+            }
             message = argv[2];
+        }
+        else{
+            cerr << "\033[31mError: Invalid commit command usage. Use 'voxel commit -m \"message\"' or 'voxel commit ai'.\033[0m\n";
         }
 
         Commands::commit_changes(message);
