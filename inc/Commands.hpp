@@ -30,13 +30,13 @@ public:
     static void create_snapshot();
     static void restore_snapshot();
     static void clear_snapshot_silent();
+    static bool should_ignore_extension(const std::string& ext);
 
 
 private:
     static std::pair<std::string, std::map<std::string, CommitNode>> build_complete_repo_graph();
     static void checkout_files_from_tree(const std::string& tree_hash);
     static bool is_snapshot_empty();
-    static bool should_ignore_extension(const std::string& ext);
 
 };
 

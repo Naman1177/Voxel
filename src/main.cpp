@@ -190,18 +190,18 @@ int main(int argc, char *argv[])
         string optional_note = "";
 
         if (argc == 2){
-            target.push_back(FileSystem::read_file_to_string(FileSystem::get_current_active_file()));
+            target.push_back(FileSystem::get_current_active_file());
         }
         else if (argc == 3){
             string arg2 = argv[2];
             if (arg2 == "all") {
-                //target = Commands::get_modified_untracked_files();
+                target = FileSystem::get_all_files_in_repo();
             }
             else if (fs::exists(arg2)) {
                 target.push_back(arg2);
             }
             else {
-                target.push_back(FileSystem::read_file_to_string(FileSystem::get_current_active_file()));
+                target.push_back(FileSystem::get_current_active_file());
                 optional_note = arg2;
             }
         }
@@ -209,7 +209,7 @@ int main(int argc, char *argv[])
             string arg2 = argv[2];
             string arg3 = argv[3];
             if (arg2 == "all") {
-                //target = Commands::get_modified_untracked_files();
+                target = FileSystem::get_all_files_in_repo();
             }
             else if (fs::exists(arg2)) {
                 target.push_back(arg2);
