@@ -2,7 +2,7 @@
 #include "FileSystem.hpp"
 #include "Zstd.hpp"
 #include "Hashing.hpp"
-
+#include "ai.hpp"
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -91,6 +91,7 @@ void Commands::track_all_files()
 }
 void Commands::commit_changes(const string &message)
 {
+    string user = Commands::get_user_name();
     if (!fs::exists(".voxel/index"))
     {
         cerr << "\033[31mError: No tracked files found. Please run 'voxel track' before committing.\033[0m\n";
@@ -122,12 +123,11 @@ void Commands::commit_changes(const string &message)
             parent_hash = saved_parent;
         }
     }
-    string author = "Naman Malhotra";
     string timestamp = get_current_timestamp();
     stringstream commit_stream;
     commit_stream << "tree - " << tree_hash << "\n";
     commit_stream << "parent - " << parent_hash << "\n";
-    commit_stream << "author - " << author << "\n";
+    commit_stream << "author - " << user << "\n";
     commit_stream << "timestamp - " << timestamp << "\n\n";
     commit_stream << "Message - " << message << "\n";
     string commit_content = commit_stream.str();
@@ -999,5 +999,16 @@ bool Commands::should_ignore_extension(const string &ext)
         ".zip", ".rar", ".7z",".pdf"};
     return std::find(ignored_formats.begin(), ignored_formats.end(), clean_ext) != ignored_formats.end();
 }
-
+string Commands::get_user_name(){
+    ifstream config_file(".voxel/config");
+    string user_name = "";
+    if (config_file.is_open()){
+        if (std::getline(config_file, user_name)){
+            user_name.erase(0,9);
+            user_name.erase(user_name.find_last_not_of(" \t\r\n") + 1);
+        }
+        config_file.close();
+    }
+    return user_name;
+}
 
