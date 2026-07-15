@@ -7,12 +7,12 @@
 #include "Hashing.hpp"
 #include "Commands.hpp"
 #include "ai.hpp"
+#include "diff_merge.hpp"
 namespace fs = std::filesystem;
 using namespace std;
 
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]){
     if (argc < 2)
     {
 
@@ -207,7 +207,7 @@ int main(int argc, char *argv[])
         else if (argc == 3){
             string arg2 = argv[2];
             if (arg2 == "all") {
-                target = FileSystem::get_all_files_in_repo();
+                target = FileSystem::list_workspace_files();
             }
             else if (fs::exists(arg2)) {
                 target.push_back(arg2);
@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
             string arg2 = argv[2];
             string arg3 = argv[3];
             if (arg2 == "all") {
-                target = FileSystem::get_all_files_in_repo();
+                target = FileSystem::list_workspace_files();
             }
             else if (fs::exists(arg2)) {
                 target.push_back(arg2);
@@ -236,19 +236,45 @@ int main(int argc, char *argv[])
             
     }
     else if (command == "diff") {
-        if (argc < 4) {
-            std::cout << "Error: You must provide two files to compare.\n";
-            std::cout << "Usage: ./voxel diff <old_file.cpp> <new_file.cpp>\n";
-            return 1;
+        vector<string> args;
+        for (int i = 2; i < argc; i++){
+            args.push_back(argv[i]);
         }
-        
-        std::string fileA = argv[2];
-        std::string fileB = argv[3];
-        
-        // Pass the files to your Commands handler
-        Commands::display_diff(fileA, fileB);
+        diffEngine::route_diff(args);
     }
-    
+    else if(command == "freeze"){
+        Commands::track_all_files();
+        std::string message;
+
+        if (argc == 2)
+        {
+            std::cout << "\033[1;36m┌───[ Voxel Commit Message Prompt ]───┐\033[0m\n";
+            std::cout << "│ Enter commit message: ";
+
+            getline(std::cin, message);
+            cout << "\033[1;36m+-------------------------------------+\033[0m\n";
+
+            if (message.empty())
+            {
+                std::cerr << "\033[31mError: Freeze aborted due to empty message.\033[0m\n";
+                return 1;
+            }
+        }
+
+        else if (argc == 3){
+            if (string(argv[2]) == "ai") {
+                ai::commit_with_ai();
+                return 0;
+            }
+            message = argv[2];
+        }
+        else{
+            cerr << "\033[31mError: Invalid freeze command usage. Use 'voxel freeze -m \"message\"' or 'voxel freeze ai'.\033[0m\n";
+        }
+
+        Commands::commit_changes(message);
+        Commands::clear_snapshot_silent();
+    }
     else
     {
         cout << "Error: Unknown command '" << command << "'\n";

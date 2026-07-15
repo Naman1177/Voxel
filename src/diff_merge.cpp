@@ -1,12 +1,13 @@
 #include "diff_merge.hpp"
 #include "Hashing.hpp"
 #include "FileSystem.hpp"
+#include "Zstd.hpp"
+#include "Commands.hpp"
 #include <vector>
 #include <iomanip>
 #include <sstream>
 #include <iostream>
-
-
+namespace fs = std::filesystem;
 using namespace std;
 #define RESET       "\033[0m"
 #define RED         "\033[31m"
@@ -295,4 +296,45 @@ void diffEngine::render_diff(const std::vector<DiffResult>& results, const std::
     std::cout << "____________________________________________________________\n";
     std::cout << "\n";
 }
+void diffEngine::run_engine_on_file(const std::string& filepath, const std::string& old_content, const std::string& new_content) {
+    std::vector<Block> old_blocks = diffEngine::parse_memory(old_content);
+    std::vector<Block> new_blocks = diffEngine::parse_memory(new_content);
+    
+    std::vector<DiffResult> diffs = diffEngine::analyze_diff(old_blocks, new_blocks);
+    
+    if (!diffs.empty()) {
+        diffEngine::render_diff(diffs, filepath + " (Old)", filepath + " (New)");
+    }
+}
+static string fetch_decompress(const std::string& object_hash){
+    if (object_hash.empty()) return "";
+    string src_path = ".voxel/objects/" + object_hash;
+    string tmp_path = ".voxel/tmp_diff_" + object_hash;
+    if (Zstd::decompress_file(src_path, tmp_path)) {
+        
+        std::string content = FileSystem::read_file_to_string(tmp_path);
+        fs::remove(tmp_path); 
+        return content;
+    }
+    return "";
+}
+void diffEngine::route_diff(const std::vector<std::string>& args) {
+    vector<string> all_files = FileSystem::list_workspace_files();
+    if (args.empty()) {
+        std::cout << BOLD << CYAN << "Scanning workspace against last commit...\n" << RESET;
+        
+        for (const auto& file : all_files) {
+            if (Commands::should_ignore_extension(file)) continue;
+            
+            std::string current_live_code = FileSystem::read_file_to_string(file);
+            
+            // TODO: Replace "dummy_hash" with actual object hash from your Repository class
+            std::string old_commit_code = fetch_decompress("2b37c4f1f3c912cb979fb53fea8a095d2382deee0ce78e0b583065de50d55487"); 
+            
+            run_engine_on_file(file, old_commit_code, current_live_code);
+        }
+        return;
+    }
 
+
+}
