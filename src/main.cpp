@@ -29,6 +29,13 @@ int main(int argc, char *argv[])
         cout << "  where              Show the current branch name\n";
         cout << "  track              Track all files in the workspace\n";
         cout << "  graph              Display a visual commit graph of the repository\n";
+        cout << "  export             Export the repository graph to a PDF file\n";
+        cout << "  restore [exp]      Restore the workspace to a previous state (exp can be a commit hash, branch name, or HEAD)\n";
+        cout << "  snapshot          Create a snapshot of the current workspace state\n";
+        cout << "  snapback           Restore the workspace to the last snapshot state\n";
+        cout << "  snapclear          Clear the last snapshot state, allowing for a new snapshot to be created\n";
+        cout << "  login             Log in to the AI system for enhanced features\n";
+        cout << "  review [file] [note]  Review code with AI assistance (optional file and note)\n";
         return 1;
     }
 
@@ -228,7 +235,19 @@ int main(int argc, char *argv[])
         ai::execute_voxel_review(target, optional_note);
             
     }
-    
+    else if (command == "diff") {
+        if (argc < 4) {
+            std::cout << "Error: You must provide two files to compare.\n";
+            std::cout << "Usage: ./voxel diff <old_file.cpp> <new_file.cpp>\n";
+            return 1;
+        }
+        
+        std::string fileA = argv[2];
+        std::string fileB = argv[3];
+        
+        // Pass the files to your Commands handler
+        Commands::display_diff(fileA, fileB);
+    }
     
     else
     {
@@ -240,3 +259,13 @@ int main(int argc, char *argv[])
 }
 
     
+
+//big file slicing
+//maybe a save when cmd+s pressed invissible save
+//imp cloud sharing on same wifi collab
+//more good voxelignore
+//mbedtls with hardware crypto sign
+//bin for branches
+//may diff user experience
+//lens features
+//file that have all list of dependencies and workspace environment

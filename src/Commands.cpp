@@ -2,6 +2,7 @@
 #include "FileSystem.hpp"
 #include "Zstd.hpp"
 #include "Hashing.hpp"
+#include "diff_merge.hpp"
 #include "ai.hpp"
 #include <iostream>
 #include <fstream>
@@ -1011,4 +1012,19 @@ string Commands::get_user_name(){
     }
     return user_name;
 }
+void Commands::display_diff(const std::string& fileA, const std::string& fileB) {
+    // 1. Parse both files from the disk into blocks
+    std::vector<Block> old_blocks = diffEngine::parse_file(fileA);
+    std::vector<Block> new_blocks = diffEngine::parse_file(fileB);
 
+    // 2. Catch read errors (if files don't exist, the vectors will be empty)
+    if (old_blocks.empty() || new_blocks.empty()) {
+        return; // The parser already prints the red error message
+    }
+
+    // 3. Analyze the differences in memory
+    std::vector<DiffResult> diffs = diffEngine::analyze_diff(old_blocks, new_blocks);
+
+    // 4. Render the beautiful UI to the terminal
+    diffEngine::render_diff(diffs, fileA, fileB);
+}

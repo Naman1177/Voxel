@@ -32,6 +32,7 @@ public:
     static void restore_snapshot();
     static void clear_snapshot_silent();
     static bool should_ignore_extension(const std::string& ext);
+    static void display_diff(const std::string& fileA, const std::string& fileB);
 
 
 private:
