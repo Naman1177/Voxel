@@ -275,6 +275,18 @@ int main(int argc, char *argv[]){
         Commands::commit_changes(message);
         Commands::clear_snapshot_silent();
     }
+    else if (command == "diverge") {
+        std::vector<std::string> args;
+        
+        for (int i = 2; i < argc; i++) {
+            args.push_back(argv[i]);
+        }
+        Commands::diverge(args);
+    }
+    
+    
+    
+    
     else
     {
         cout << "Error: Unknown command '" << command << "'\n";

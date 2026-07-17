@@ -20,6 +20,13 @@
 #include <unistd.h>
 using namespace std;
 namespace fs = std::filesystem;
+#define RESET       "\033[0m"
+#define RED         "\033[31m"
+#define GREEN       "\033[32m"
+#define YELLOW      "\033[33m"
+#define CYAN        "\033[36m"
+#define BOLD        "\033[1m"
+#define DIM         "\033[2m"
 
 string get_current_timestamp()
 {
@@ -177,22 +184,20 @@ void Commands::create_branch(const string &branch_name)
     std::ofstream ofs(target_file_path);
     ofs << active_hash;
     ofs.close();
-    string printing_wala = full_new_branch;
-    replace(printing_wala.begin(), printing_wala.end(), '@', '/');
+    Commands::switch_branch(full_new_branch);
 
-    std::cout << "\033[1;32mBranch '" << printing_wala << "' successfully created at commit [" << active_hash.substr(0, 8) << "...]!\033[0m\n";
+    std::cout << "\033[1;32mBranch '" << full_new_branch << "' successfully created at commit [" << active_hash.substr(0, 8) << "...]!\033[0m\n";
 
 } // create branch
 void Commands::switch_branch(const string &target_branch)
 {
-
+    string current_branch = get_current_branch_name();
     if (target_branch.empty() || target_branch.find(' ') != std::string::npos)
     {
         std::cout << "\033[31mError: Branch name cannot be empty or contain spaces.\033[0m\n";
         return;
     }
     string internal_name = target_branch;
-    replace(internal_name.begin(), internal_name.end(), '/', '@');
     string branch_path = ".voxel/refs/heads/" + internal_name;
     if (!fs::exists(branch_path) || fs::is_directory(branch_path))
     {
@@ -202,6 +207,12 @@ void Commands::switch_branch(const string &target_branch)
     ofstream head_file(".voxel/HEAD", ios::trunc);
     head_file << "ref: refs/heads/" << internal_name;
     head_file.close();
+    string commit_hash = FileSystem::read_file_to_string(branch_path);
+    string current_commit_hash = FileSystem::read_file_to_string(".voxel/refs/heads/" + current_branch);
+    if (commit_hash != current_commit_hash){
+        Commands::restore_workspace_state(commit_hash);
+    }
+
     std::cout << "\033[1;32mSwitched to branch '" << target_branch << "' successfully!\033[0m\n";
 }
 std::pair<std::string, std::map<std::string, Commands::CommitNode>> Commands::build_complete_repo_graph()
@@ -913,12 +924,12 @@ void Commands::create_snapshot()
 {
     std::string snap_root = ".voxel/snapshot";
 
-    // 🔒 SINGLE-SLOT CONSTRAINT GUARD
+    
     if (!is_snapshot_empty())
     {
-        std::cerr << "\033[31mError: An active snapshot already exists.\033[0m\n";
-        std::cerr << "You must run '\033[33mvoxel snapback\033[0m' first to clear the last state data.\n";
-        return;
+        std::cerr << "\033[31mAn active snapshot already exists.\033[0m\n";
+        Commands::clear_snapshot_silent();
+       
     }
 
     if (!fs::exists(snap_root))
@@ -932,8 +943,6 @@ void Commands::create_snapshot()
         std::cerr << "Error: Failed to initialize snapshot index ledger.\n";
         return;
     }
-
-    // 🔄 Securely fetch pre-filtered files (Zero risk of catching 'voxel' or '.git')
     std::vector<std::string> workspace_files = FileSystem::list_workspace_files();
 
     std::cout << "\033[36mGenerating high-speed workspace shadow snapshot...\033[0m\n";
@@ -1027,4 +1036,54 @@ void Commands::display_diff(const std::string& fileA, const std::string& fileB) 
 
     // 4. Render the beautiful UI to the terminal
     diffEngine::render_diff(diffs, fileA, fileB);
+}
+void Commands::diverge(const vector<string>& args){
+    if (args.empty()) {
+        cerr << RED << "Error: Missing commit hash. Usage: voxel diverge <hash> 'branch_name'\n" << RESET;
+        return;
+    }
+    string commit_hash = args[0];
+    if (commit_hash.length() != 64) {
+        cerr << RED << "Error: '" << commit_hash << "' is not a valid 64-character SHA-256 hash.\n" << RESET;
+        return;
+    }
+    string commit_obj_path = ".voxel/objects/" + commit_hash;
+    if (!fs::exists(commit_obj_path)) {
+        cerr << RED << "Error: Commit object does not exist in the repository.\n" << RESET;
+        return;
+    }
+    string branch_name;
+    if (args.size() == 1) {
+        std::cout << BOLD << CYAN << "\n┌─[ Voxel Diverge ]──────────────────────────┐\n" << RESET;
+        std::cout << "│ Target verified. Enter new branch name: \n";
+        std::getline(std::cin, branch_name);
+        std::cout << BOLD << CYAN << "└────────────────────────────────────────────┘\n" << RESET;
+        
+        if (branch_name.empty()) {
+            std::cerr << RED << "Error: Branch name cannot be empty. Aborting.\n" << RESET;
+            return;
+        }
+
+    }
+    else {
+        branch_name = args[1];
+    }
+    string ref_path = ".voxel/refs/heads/" + branch_name;
+    if (fs::exists(ref_path)) {
+        cerr << RED << "Error: Branch '" << branch_name << "' already exists.\n" << RESET;
+        return;
+    }
+    cout << BOLD << CYAN << "\nDiverging timeline... Extruding branch '" << branch_name << "'\n" << RESET;
+    ofstream branch_file(ref_path);
+    branch_file << commit_hash;
+    branch_file.close();
+    ofstream head_file(".voxel/HEAD");
+    head_file << "ref: refs/heads/" + branch_name;
+    head_file.close();
+    Commands::restore_workspace_state(commit_hash);
+    Commands::clear_snapshot_silent();
+    Commands::create_snapshot();
+
+
+
 }
