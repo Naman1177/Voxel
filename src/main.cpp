@@ -236,11 +236,34 @@ int main(int argc, char *argv[]){
             
     }
     else if (command == "diff") {
-        vector<string> args;
-        for (int i = 2; i < argc; i++){
-            args.push_back(argv[i]);
+        bool use_ai = false;
+        std::vector<std::string> clean_args;
+        for (int i = 2; i < argc; i++) {
+            std::string arg = argv[i];
+            if (arg == "-ai" || arg == "--ai") {
+                use_ai = true;
+                if(argc == 5) {
+                    clean_args.push_back(argv[3]); 
+                    clean_args.push_back(argv[4]);
+                } 
+                else if(argc == 4){
+                    clean_args.push_back(argv[3]); 
+                }
+            }
+            
+            else {
+                for (int i = 2; i < argc; i++){
+                    clean_args.push_back(argv[i]);
+                }
+            }
         }
-        diffEngine::route_diff(args);
+        if (use_ai) {
+            diffEngine::ai_diff(clean_args);
+        } 
+        else {
+           
+            diffEngine::route_diff(clean_args);
+        }
     }
     else if(command == "freeze"){
         Commands::track_all_files();
@@ -282,9 +305,7 @@ int main(int argc, char *argv[]){
             args.push_back(argv[i]);
         }
         Commands::diverge(args);
-    }
-    
-    
+    } 
     
     
     else

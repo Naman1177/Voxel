@@ -40,6 +40,7 @@ public:
     static std::vector<DiffResult> analyze_diff(const std::vector<Block>& old_blocks,const std::vector<Block>& new_blocks);
     static void render_diff(const std::vector<DiffResult>& results, const std::string& fileA,  const std::string& fileB);
     static void route_diff(const std::vector<std::string>& args);
+    static void ai_diff(const std::vector<std::string> &args);
 };
 
 

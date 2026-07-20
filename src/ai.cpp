@@ -13,6 +13,13 @@
 #include <Commands.hpp>
 #include "Zstd.hpp"
 #include "../third_party_lib/ai_parser/json.hpp"
+#define RESET "\033[0m"
+#define RED "\033[31m"
+#define GREEN "\033[32m"
+#define YELLOW "\033[33m"
+#define CYAN "\033[36m"
+#define BOLD "\033[1m"
+#define DIM "\033[2m"
 using namespace std;
 namespace fs = std::filesystem;
 const string CONFIG_PATH = ".voxel/config";
@@ -412,49 +419,89 @@ void ai::execute_voxel_review(const std::vector<std::string> &files_to_review, c
         }
         cout << "\n\033[1;34mVoxel AI is auditing " << filename << "...\033[0m\n";
         cout << "-------------------------------------------------------\n";
-        cout << ai_agent.execute(fixed_prompt, content_payload) << "\n";
-        cout << "-------------------------------------------------------\n";
-        cout << "\033[1;33mWould you like Voxel Agent to automatically apply these fixes to " << filename << "? (yes/no): \033[0m";
-        string choice;
-        cin >> choice;
-        if (choice == "yes" || choice == "y" || choice == "Y" || choice == "Yes" || choice == "YES")
+        string json_response = ai_agent.execute(fixed_prompt, content_payload);
+
+        string fixed_code = "";
+
+        // 2. Parse the JSON safely
+        try
         {
-            if (!snapshot_created)
+            nlohmann::json parsed = nlohmann::json::parse(json_response);
+
+            // 3. Print ONLY the explanation to the terminal with nice formatting
+            if (parsed.contains("explanation"))
             {
-                Commands::clear_snapshot_silent();
-                Commands::create_snapshot();
-                snapshot_created = true;
-            }
-            string agent_prompt =
-                "You are a precise automated refactoring engine. Rewrite the provided source code to fix the audited issues. "
-                "You must return ONLY the raw, complete, updated source code text. Do NOT wrap your answer in markdown code blocks "
-                "(no ```cpp or ```), do NOT include introductory pleasantries, and do NOT explain changes. Your entire response "
-                "must be valid, compilable code matching the original file.";
-            string fixed_code = ai_agent.execute(agent_prompt, content_payload);
-            if (!fixed_code.empty() && fixed_code.find("Error:") == string::npos)
-            {
-                ofstream outfile(filename, ios::out | ios::trunc);
-                if (outfile.is_open())
+                std::cout << "\n\033[1;36mAI Diagnosis:\033[0m\n"; // Cyan header
+                std::cout << parsed["explanation"].get<std::string>() << "\n\n";
+                cout << "-------------------------------------------------------\n";
+                cout << "\033[1;33mWould you like Voxel Agent to automatically apply these fixes to " << filename << "? (yes/no): \033[0m";
+                string choice;
+                cin >> choice;
+                if (choice == "yes" || choice == "y" || choice == "Y" || choice == "Yes" || choice == "YES")
                 {
-                    outfile << fixed_code;
-                    outfile.close();
-                    cout << "\033[1;32mSuccess! " << filename << " optimized and updated by Voxel AI Agent.\033[0m\n";
-                    cout << "\033[1;33mA snapshot of the previous state before ai changed the file has been created. Use 'voxel snapback' to revert if needed.\033[0m\n";
+                    if (!snapshot_created)
+                    {
+                        Commands::clear_snapshot_silent();
+                        Commands::create_snapshot();
+                        snapshot_created = true;
+                    }
+                    string agent_prompt =
+                        "You are a precise automated refactoring engine. Rewrite the provided source code to fix the audited issues. "
+                        "You must return ONLY the raw, complete, updated source code text. Do NOT wrap your answer in markdown code blocks "
+                        "(no ```cpp or ```), do NOT include introductory pleasantries, and do NOT explain changes. Your entire response "
+                        "must be valid, compilable code matching the original file.";
+                    string fixed_code = ai_agent.execute(agent_prompt, content_payload);
+                    if (!fixed_code.empty() && fixed_code.find("Error:") == string::npos)
+                    {
+                        ofstream outfile(filename, ios::out | ios::trunc);
+                        if (outfile.is_open())
+                        {
+                            outfile << fixed_code;
+                            outfile.close();
+                            cout << "\033[1;32mSuccess! " << filename << " optimized and updated by Voxel AI Agent.\033[0m\n";
+                            cout << "\033[1;33mA snapshot of the previous state before ai changed the file has been created. Use 'voxel snapback' to revert if needed.\033[0m\n";
+                        }
+                        else
+                        {
+                            cout << "\033[1;31mError: Failed to commit update vector to disk.\033[0m\n";
+                        }
+                    }
+                    else
+                    {
+                        cout << "\033[1;31mError: AI Engine failed to generate stable refactoring stream.\033[0m\n";
+                    }
                 }
                 else
                 {
-                    cout << "\033[1;31mError: Failed to commit update vector to disk.\033[0m\n";
+                    cout << "Review complete. File left unchanged.\n";
                 }
             }
             else
             {
-                cout << "\033[1;31mError: AI Engine failed to generate stable refactoring stream.\033[0m\n";
+                std::cerr << "\033[1;31m❌ AI response missing 'explanation' key.\033[0m\n";
+                return;
+            }
+
+            // 4. Save the code portion to a variable so you can write it to the file later
+            if (parsed.contains("code"))
+            {
+                fixed_code = parsed["code"].get<std::string>();
+            }
+            else
+            {
+                std::cerr << "\033[1;31mAI response missing 'code' key.\033[0m\n";
+                return;
             }
         }
-        else
+        catch (nlohmann::json::parse_error &e)
         {
-            cout << "Review complete. File left unchanged.\n";
+            std::cerr << "\033[1;31mFailed to parse AI JSON response: " << e.what() << "\033[0m\n";
+            return;
         }
+
+        // 5. NOW prompt the user
+
+        // ... rest of your code (cin >> choice, write fixed_code to file, etc.) ...
 
         cout << "-------------------------------------------------------\n";
     }
@@ -533,7 +580,8 @@ void ai::commit_with_ai()
                 // 4. Delete the temp file immediately to keep the workspace clean
                 fs::remove(temp_path);
 
-                change_summary << "[PREVIOUS STATE]\n"<< old_code << "\n";
+                change_summary << "[PREVIOUS STATE]\n"
+                               << old_code << "\n";
             }
 
             std::string new_code = FileSystem::read_file_to_string(file_path);
@@ -555,8 +603,7 @@ void ai::commit_with_ai()
     {"commit_message": "Brief clear summary of the changes starting with a capital letter"}
     IMPORTANT: Do NOT use scopes like (example) or (core). Just use the type (e.g., feat, fix, refactor, chore) followed by a colon.)
     IMPORTANT: Do NOT use Git conventional commit prefixes like "feat:", "fix:", or "chore:". Just write the plain English summary.)";
-    
-    
+
     cout << "\033[1;35mAnalyzing compressed object and generating message...\033[0m\n";
     ai::sendToAI ai_agent;
     string raw_response = ai_agent.execute(system_prompt, change_summary.str());
@@ -592,4 +639,42 @@ void ai::commit_with_ai()
     std::cout << "\033[1;32mVoxel AI drafted message:\033[0m \"" << ai_commit_msg << "\"\n";
     std::cout << "\033[1;36mHanding off to Voxel commit engine...\033[0m\n";
     Commands::commit_changes(ai_commit_msg);
+}
+void ai::run_ai_diff(const std::string &filepath, const std::string &old_content, const std::string &new_content)
+{
+    ai::sendToAI ai_agent;
+    std::cout << DIM << "Analyzing structural changes and blast radius for " << filepath << "..." << RESET << "\n\n";
+
+    // 1. Combine old and new content into a single payload
+    std::string ai_payload = "FILE: " + filepath + "\n\n";
+    ai_payload += "=== OLD FILE CONTENT ===\n";
+    ai_payload += old_content + "\n\n";
+    ai_payload += "=== NEW FILE CONTENT ===\n";
+    ai_payload += new_content + "\n";
+
+    // 2. Strict System Prompt (NO JSON, Pure Terminal Formatting)
+    std::string system_prompt =
+        "You are Voxel's AI Diff Analyzer, a semantic version control assistant.\n"
+        "I will provide you with the old and new content of a file.\n\n"
+        "STRICT OUTPUT RULES:\n"
+        "1. DO NOT output JSON under any circumstances.\n"
+        "2. DO NOT wrap your entire response in markdown code blocks (e.g., no ``` or ```json).\n"
+        "3. Output ONLY clean, human-readable terminal text following the exact template below.\n\n"
+        "TEMPLATE:\n\n"
+        "🌟 EXECUTIVE SUMMARY:\n"
+        "<Write a punchy, 1-sentence summary of the entire file change>\n\n"
+        "🔍 SCOPE BREAKDOWN:\n"
+        "• Scope: [<Scope Name, e.g., def start_engine()>]\n"
+        "  - Change: <1-sentence explanation of what changed>\n"
+        "  - Edits: <Brief bullet points of additions/removals>\n"
+        "(Repeat for each modified, added, or deleted scope)\n\n"
+        "📈 OVERALL CHANGE SUMMARY:\n"
+        "• <Estimate lines added, deleted, and modified based on the code provided>\n\n"
+        "⚠️ BLAST RADIUS & IMPACT:\n"
+        "• <Bullet point 1: What other functions, files, or imports might break/need updates>\n"
+        "• <Bullet point 2: Variable scope leaks, unhandled exceptions, or architectural shifts>";
+
+    // 3. Dispatch to AI router
+    cout << "\033[1;35mFiling AI diff request for " << filepath << "...\033[0m\n";
+    cout << ai_agent.execute(system_prompt, ai_payload);
 }
