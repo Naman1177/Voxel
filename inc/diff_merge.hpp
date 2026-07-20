@@ -31,7 +31,7 @@ struct DiffResult {
 class diffEngine{
 private:
     static std::string generate_block_hash(const std::vector<std::string>& lines);
-    static bool is_scope_header(const std::string& raw_line);
+    static bool is_scope_header(const std::string& raw_line, std::string& out_scope_name);
     static void run_engine_on_file(const std::string& filepath, const std::string& old_content, const std::string& new_content);
 
 public:

@@ -21,160 +21,78 @@ using namespace std;
 
 
 std::string diffEngine::generate_block_hash(const std::vector<std::string>& lines) {
-    string buffer = "";
-    
-    for (const auto& raw_line : lines) {
-        std::string line = raw_line;
-        
-        // 1. Strip C++ inline comments
-        size_t comment_pos = line.find("//");
-        if (comment_pos != std::string::npos) {
-            line = line.substr(0, comment_pos);
-        }
-        
-        // 2. Trim all leading and trailing whitespace
-        size_t start = line.find_first_not_of(" \t\r\n");
-        if (start != std::string::npos) {
-            size_t end = line.find_last_not_of(" \t\r\n");
-            line = line.substr(start, end - start + 1);
-            
-            // 3. Only add to the hash buffer if there is actual code left
-            if (!line.empty()) {
-                buffer += line + "\n";
-            }
+    std::string combined = "";
+    for (const auto& line : lines) {
+        // If the line contains something OTHER than spaces, tabs, or newlines
+        if (line.find_first_not_of(" \t\r\n") != std::string::npos) {
+            combined += line + "\n";
         }
     }
-    
-    // Pass the pure, sanitized code string to your mbedTLS hardware layer
-    return Hashing::generate_sha256(buffer); 
+    return Hashing::generate_sha256(combined); 
 }
 
-vector<Block> diffEngine::parse_file(const string& filepath) {
-    string file_content = FileSystem::read_file_to_string(filepath);
-    if (file_content.empty()) {
-        return vector<Block>();
-    }
+std::vector<Block> diffEngine::parse_file(const std::string& filepath) {
+    std::string file_content = FileSystem::read_file_to_string(filepath);
+    if (file_content.empty()) return std::vector<Block>();
     return diffEngine::parse_memory(file_content);
 }
 
-bool diffEngine::is_scope_header(const std::string& raw_line) {
-   
+bool diffEngine::is_scope_header(const std::string& raw_line, std::string& out_scope_name) {
     size_t start = raw_line.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return false; 
+    if (start == std::string::npos) return false;
     
-    size_t end = raw_line.find_last_not_of(" \t\r\n");
-    std::string line = raw_line.substr(start, end - start + 1);
-
-    if (line.back() == ';') return false;
-    if (line.find("class ") == 0 || line.find("struct ") == 0 || 
-        line.find("namespace ") == 0 || line.find("def ") == 0 || 
-        line.find("interface ") == 0 || line.find("enum ") == 0) {
+    std::string line = raw_line.substr(start);
+    
+    // Sniff for Structural Keywords (Python & C++ friendly)
+    if (line.find("def ") == 0 || line.find("class ") == 0 || 
+        line.find("struct ") == 0 || line.find("namespace ") == 0 ||
+        line.find("for ") == 0 || line.find("for(") == 0 ||
+        line.find("while ") == 0 || line.find("while(") == 0 ||
+        line.find("if ") == 0 || line.find("if(") == 0 ||
+        line.find("elif ") == 0 || line.find("else if ") == 0|| line.find("else if(") == 0 || line.find("else ") == 0 ||
+        line.find("switch ") == 0 || line.find("switch(") == 0|| line.find("else ") == 0){
         
-        if (line.find("using ") == 0) return false; 
+        // Clean up the scope name for the UI (remove trailing colons or braces)
+        size_t end = line.find_last_not_of(" {:\r\n");
+        out_scope_name = line.substr(0, end + 1);
         return true;
     }
-    size_t open_paren = line.find('(');
-    size_t close_paren = line.find(')');
-    
-    if (open_paren != std::string::npos && close_paren != std::string::npos && open_paren < close_paren) {
-        if (line.find("if ") == 0 || line.find("if(") == 0 ||
-            line.find("for ") == 0 || line.find("for(") == 0 ||
-            line.find("while ") == 0 || line.find("while(") == 0 ||
-            line.find("catch ") == 0 || line.find("catch(") == 0 ||
-            line.find("switch ") == 0 || line.find("switch(") == 0 ||
-            line.find("else ") == 0 || line.find("else{") == 0 ||
-            line.find("else if ") == 0 || line.find("else if(") == 0||
-            line.find("elif ") == 0 || line.find("elif(") == 0||
-            line.find("try ") == 0 || line.find("try(") == 0) {
-            return true;
-        }
-        char last_char = line.back();
-        if (last_char == '{' || last_char == ')' || last_char == ':') {
-            return true;
-        }
-    }
-
     return false;
 }
 
-static void render_granular_diff(const std::vector<std::string>& old_lines, const std::vector<std::string>& new_lines, int& lines_ins, int& chars_ins, int& lines_del, int& chars_del) {
-    size_t i = 0, j = 0;
-    
-    // Simple side-by-side comparison
-    while (i < old_lines.size() || j < new_lines.size()) {
-        // Case 1: Lines are identical
-        if (i < old_lines.size() && j < new_lines.size() && old_lines[i] == new_lines[j]) {
-            std::cout << DIM << std::setw(4) << " " << " │ " << RESET << "  " << old_lines[i] << "\n";
-            i++; j++;
-        }
-        // Case 2: Line deleted
-        else if (i < old_lines.size() && (j >= new_lines.size() || old_lines[i] != new_lines[j])) {
-            std::cout << DIM << std::setw(4) << " " << " │ " << RESET << RED << "- " << old_lines[i] << RESET << "\n";
-            lines_del++;
-            chars_del += old_lines[i].length();
-            i++;
-        }
-        // Case 3: Line added
-        else {
-            std::cout << DIM << std::setw(4) << " " << " │ " << RESET << GREEN << "+ " << new_lines[j] << RESET << "\n";
-            lines_ins++;
-            chars_ins += new_lines[j].length();
-            j++;
-        }
-    }
-}
 std::vector<Block> diffEngine::parse_memory(const std::string& raw_content) {
     std::vector<Block> blocks;
     std::stringstream stream(raw_content);
     std::string line;
     
     int line_num = 1;
-    int scope_depth = 0; // NEW: The Brace Depth Tracker
-    
     Block current_block;
     current_block.start_line = 1;
-    std::string current_scope = "Global Scope";
+    current_block.scope = "Global Scope";
+    
+    std::string scope_name;
 
     while (std::getline(stream, line)) {
-        // 1. Update brace depth (count '{' and '}')
-        for (char c : line) {
-            if (c == '{') scope_depth++;
-            else if (c == '}') scope_depth--;
-        }
-        if (scope_depth < 0) scope_depth = 0; // Prevent negative depth edge-cases
-
-        // 2. Sniff for block headers
-        if (is_scope_header(line)) {
-            // NEW: Only update the name if we are at the top level of the function!
-            if (scope_depth <= 1) { 
-                size_t start = line.find_first_not_of(" \t\r");
-                current_scope = (start != std::string::npos) ? line.substr(start) : line;
-            }
-        }
-
-        // 3. Chunking Rule: Only cut on a blank line IF we are outside all scopes
-        bool is_blank_line = (line.empty() || line.find_first_not_of(" \t\r") == std::string::npos);
-        
-        if (is_blank_line && scope_depth == 0) {
+        // If we hit a new structural header, package the old block and start a new one
+        if (is_scope_header(line, scope_name)) {
             if (!current_block.lines.empty()) {
                 current_block.end_line = line_num - 1;
-                current_block.scope = current_scope;
                 current_block.content_hash = generate_block_hash(current_block.lines);
                 blocks.push_back(current_block);
-                
-                current_block = Block(); // Clean up state
-                current_block.start_line = line_num + 1; // Mark start of next block
             }
-        } else {
-            current_block.lines.push_back(line);
+            // Start new block
+            current_block = Block();
+            current_block.start_line = line_num;
+            current_block.scope = scope_name;
         }
+        
+        current_block.lines.push_back(line);
         line_num++;
     }
 
-    // Capture residual block at the end of the file
+    // Capture the final block
     if (!current_block.lines.empty()) {
         current_block.end_line = line_num - 1;
-        current_block.scope = current_scope;
         current_block.content_hash = generate_block_hash(current_block.lines);
         blocks.push_back(current_block);
     }
@@ -182,48 +100,66 @@ std::vector<Block> diffEngine::parse_memory(const std::string& raw_content) {
     return blocks;
 }
 
-vector<DiffResult> diffEngine::analyze_diff(const vector<Block>& old_blocks, const vector<Block>& new_blocks) {
-    vector<DiffResult> results;
-    vector<bool> new_matched(new_blocks.size(), false);
-    vector<bool> old_matched(old_blocks.size(), false);
-    for(size_t i = 0;i<old_blocks.size();i++){
-        for (size_t j = 0; j < new_blocks.size(); j++){
-            if (!new_matched[j] && old_blocks[i].content_hash == new_blocks[j].content_hash){
+std::vector<DiffResult> diffEngine::analyze_diff(const std::vector<Block>& old_blocks, const std::vector<Block>& new_blocks) {
+    std::vector<DiffResult> results;
+    std::vector<bool> old_matched(old_blocks.size(), false);
+    std::vector<bool> new_matched(new_blocks.size(), false);
+
+    // Pass 1: Exact structural identity match (Same scope name)
+    for (size_t i = 0; i < old_blocks.size(); i++) {
+        for (size_t j = 0; j < new_blocks.size(); j++) {
+            if (!new_matched[j] && old_blocks[i].scope == new_blocks[j].scope) {
                 DiffResult res;
                 res.old_block = old_blocks[i];
                 res.new_block = new_blocks[j];
-                if (i == j) {
+                
+                if (old_blocks[i].content_hash == new_blocks[j].content_hash) {
                     res.type = UNCHANGED;
+                } else {
+                    res.type = MODIFIED;
                 }
-                else {
-                    res.type = MOVED;
-                    res.line_shift = (new_blocks[j].start_line - old_blocks[i].start_line);
-                }
+                
                 results.push_back(res);
                 old_matched[i] = true;
                 new_matched[j] = true;
-                break;
+                break; // Move to next old_block
             }
         }
     }
-    for (size_t i = 0; i < old_blocks.size(); i++){
-        if(old_matched[i]){
-            continue;
-        }
-        for (size_t j = 0; j < new_blocks.size(); j++){
-            if (!new_matched[j] && old_blocks[i].scope == new_blocks[j].scope) {
+    // Pass 1.5: Fuzzy Content Matching (Catch renamed scope headers!)
+    for (size_t i = 0; i < old_blocks.size(); i++) {
+        if (old_matched[i]) continue;
+        
+        for (size_t j = 0; j < new_blocks.size(); j++) {
+            if (new_matched[j]) continue;
+
+            // Count how many identical lines of code they share inside
+            int shared_lines = 0;
+            for (const auto& old_line : old_blocks[i].lines) {
+                // Ignore whitespace lines for the similarity check
+                if (old_line.find_first_not_of(" \t\r\n") != std::string::npos) {
+                    if (std::find(new_blocks[j].lines.begin(), new_blocks[j].lines.end(), old_line) != new_blocks[j].lines.end()) {
+                        shared_lines++;
+                    }
+                }
+            }
+
+            // If they share at least 1 line of actual code, they are the same block!
+            if (shared_lines > 0) {
                 DiffResult res;
                 res.type = MODIFIED;
                 res.old_block = old_blocks[i];
                 res.new_block = new_blocks[j];
                 results.push_back(res);
+                
                 old_matched[i] = true;
                 new_matched[j] = true;
                 break;
             }
         }
-
     }
+
+    // Pass 2: Catch Unmatched Deletions
     for (size_t i = 0; i < old_blocks.size(); i++) {
         if (!old_matched[i]) {
             DiffResult res;
@@ -232,6 +168,8 @@ vector<DiffResult> diffEngine::analyze_diff(const vector<Block>& old_blocks, con
             results.push_back(res);
         }
     }
+
+    // Pass 3: Catch Unmatched Additions
     for (size_t j = 0; j < new_blocks.size(); j++) {
         if (!new_matched[j]) {
             DiffResult res;
@@ -240,42 +178,80 @@ vector<DiffResult> diffEngine::analyze_diff(const vector<Block>& old_blocks, con
             results.push_back(res);
         }
     }
-    return results;
-        
 
+    return results;
 }
 
-void diffEngine::render_diff(const std::vector<DiffResult>& results, const std::string& fileA,  const std::string& fileB){
-    cout << BOLD << CYAN << "\n┌──────────────────────────────────────────────────────────┐\n";
-    cout << "│  VOXEL DIFF GRAPH: " << fileA << " ➔ " << fileB << "\n";
-    cout << "└──────────────────────────────────────────────────────────┘\n" << RESET;
+static void render_granular_diff(const std::vector<std::string>& old_lines, const std::vector<std::string>& new_lines, 
+                                 int old_start, int new_start, 
+                                 int& lines_ins, int& chars_ins, int& lines_del, int& chars_del) {
+    
+    size_t i = 0, j = 0;
+    
+    while (i < old_lines.size() || j < new_lines.size()) {
+        if (i < old_lines.size() && j < new_lines.size() && old_lines[i] == new_lines[j]) {
+            // UNCHANGED LINE: Skip printing
+            i++; 
+            j++;
+        } 
+        else if (i < old_lines.size() && (j >= new_lines.size() || 
+                 std::find(new_lines.begin() + j, new_lines.end(), old_lines[i]) == new_lines.end())) {
+            
+            // DELETED LINE: Only process if it's NOT just whitespace
+            if (old_lines[i].find_first_not_of(" \t\r\n") != std::string::npos) {
+                std::cout << DIM << std::setw(4) << (old_start + i) << " │ " << RESET << RED << "- " << old_lines[i] << RESET << "\n";
+                lines_del++;
+                chars_del += old_lines[i].length();
+            }
+            i++;
+        } 
+        else {
+            // ADDED LINE: Only process if it's NOT just whitespace
+            if (new_lines[j].find_first_not_of(" \t\r\n") != std::string::npos) {
+                std::cout << DIM << std::setw(4) << (new_start + j) << " │ " << RESET << GREEN << "+ " << new_lines[j] << RESET << "\n";
+                lines_ins++;
+                chars_ins += new_lines[j].length();
+            }
+            j++;
+        }
+    }
+}
+
+void diffEngine::render_diff(const std::vector<DiffResult>& results, const std::string& fileA, const std::string& fileB) {
+    std::cout << BOLD << CYAN << "\n┌──────────────────────────────────────────────────────────┐\n";
+    std::cout << "│  VOXEL DIFF GRAPH: " << fileA << " ➔ " << fileB << "\n";
+    std::cout << "└──────────────────────────────────────────────────────────┘\n" << RESET;
+    
     int lines_inserted = 0, chars_inserted = 0;
     int lines_deleted = 0, chars_deleted = 0;
-    for(auto& res : results){
+    bool has_changes = false;
+
+    for (const auto& res : results) {
         if (res.type == UNCHANGED) continue;
-        if (res.type == MOVED) {
-            std::string direction = res.line_shift > 0 ? "Down +" : "Up -";
-            std::cout << "\n" << BOLD << res.new_block.scope << RESET 
-                      << YELLOW << "  [Shifted " << direction << std::abs(res.line_shift) << " lines]" << RESET << "\n";
-            std::cout << DIM << " ────────────────────────────────────────────────────────\n" << RESET;
-        }
-        else if (res.type == ADDED) {
-            std::cout << "\nScope: " << BOLD << res.new_block.scope << RESET << "  " << GREEN << "[ADDED BLOCK]" << RESET << "\n";
+        
+        has_changes = true;
+        
+        if (res.type == MODIFIED) {
+            std::cout << "\nScope: " << BOLD << res.new_block.scope << RESET << "  " << YELLOW << "[MODIFIED]" << RESET << "\n";
             std::cout << DIM << " ────────────────────────────────────────────────────────\n" << RESET;
             
+            render_granular_diff(res.old_block.lines, res.new_block.lines, 
+                                 res.old_block.start_line, res.new_block.start_line, 
+                                 lines_inserted, chars_inserted, lines_deleted, chars_deleted);
+        }
+        else if (res.type == ADDED) {
+            std::cout << "\nScope: " << BOLD << res.new_block.scope << RESET << "  " << GREEN << "[ADDED]" << RESET << "\n";
+            std::cout << DIM << " ────────────────────────────────────────────────────────\n" << RESET;
             int ln = res.new_block.start_line;
             for (const auto& line : res.new_block.lines) {
-                // std::setw(4) perfectly aligns the line numbers!
                 std::cout << DIM << std::setw(4) << ln++ << " │ " << RESET << GREEN << "+ " << line << RESET << "\n";
                 lines_inserted++;
                 chars_inserted += line.length();
             }
         }
-        
         else if (res.type == DELETED) {
-            std::cout << "\nScope: " << BOLD << res.old_block.scope << RESET << "  " << RED << "[DELETED BLOCK]" << RESET << "\n";
+            std::cout << "\nScope: " << BOLD << res.old_block.scope << RESET << "  " << RED << "[DELETED]" << RESET << "\n";
             std::cout << DIM << " ────────────────────────────────────────────────────────\n" << RESET;
-            
             int ln = res.old_block.start_line;
             for (const auto& line : res.old_block.lines) {
                 std::cout << DIM << std::setw(4) << ln++ << " │ " << RESET << RED << "- " << line << RESET << "\n";
@@ -283,34 +259,32 @@ void diffEngine::render_diff(const std::vector<DiffResult>& results, const std::
                 chars_deleted += line.length();
             }
         }
-        
-        else if (res.type == MODIFIED) {
-            cout << "\nScope: " << BOLD << res.new_block.scope << RESET << "  " << YELLOW << "[MODIFIED STATE]" << RESET << "\n";
-            cout << DIM << " ────────────────────────────────────────────────────────\n" << RESET;
-    
-            render_granular_diff(res.old_block.lines, res.new_block.lines, lines_inserted, chars_inserted, lines_deleted, chars_deleted);
-        }
     }
 
-    // --- NEW: THE SUMMARY FOOTER ---
+    if (!has_changes) {
+        std::cout << "\n" << DIM << "  No structural changes detected." << RESET << "\n";
+    }
+
+    // SUMMARY FOOTER
     std::cout << "\n" << DIM << " ────────────────────────────────────────────────────────\n" << RESET;
     std::cout << BOLD << "DIFF SUMMARY:\n" << RESET;
     std::cout << GREEN << "    + " << lines_inserted << " lines inserted (" << chars_inserted << " characters)\n" << RESET;
     std::cout << RED   << "    - " << lines_deleted  << " lines deleted  (" << chars_deleted  << " characters)\n" << RESET;
-    std::cout << "____________________________________________________________\n";
-    std::cout << "\n";
-}
-void diffEngine::run_engine_on_file(const std::string& filepath, const std::string& old_content, const std::string& new_content) {
-    std::vector<Block> old_blocks = diffEngine::parse_memory(old_content);
-    std::vector<Block> new_blocks = diffEngine::parse_memory(new_content);
-    
-    std::vector<DiffResult> diffs = diffEngine::analyze_diff(old_blocks, new_blocks);
-    
-    if (!diffs.empty()) {
-        diffEngine::render_diff(diffs, filepath + " (Old)", filepath + " (New)");
-    }
+    std::cout << DIM << " ────────────────────────────────────────────────────────\n\n" << RESET;
 }
 
+void diffEngine::run_engine_on_file(const std::string& filepath, const std::string& old_content, const std::string& new_content) {
+    std::vector<Block> old_blocks = parse_memory(old_content);
+    std::vector<Block> new_blocks = parse_memory(new_content);
+    
+    std::vector<DiffResult> results = analyze_diff(old_blocks, new_blocks);
+    
+    // File names for UI
+    std::string old_name = filepath + " (Old)";
+    std::string new_name = filepath + " (New)";
+    
+    render_diff(results, old_name, new_name);
+}
 
 
 static string fetch_decompress(const std::string& object_hash){
