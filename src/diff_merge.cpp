@@ -9,6 +9,7 @@
 #include <iostream>
 #include <unordered_set>
 #include "ai.hpp"
+#include "../third_party_lib/dtl/dtl.hpp"
 namespace fs = std::filesystem;
 using namespace std;
 #define RESET "\033[0m"
@@ -19,12 +20,14 @@ using namespace std;
 #define BOLD "\033[1m"
 #define DIM "\033[2m"
 
+
+
 std::string diffEngine::generate_block_hash(const std::vector<std::string> &lines)
 {
     std::string combined = "";
     for (const auto &line : lines)
     {
-        // If the line contains something OTHER than spaces, tabs, or newlines
+    
         if (line.find_first_not_of(" \t\r\n") != std::string::npos)
         {
             combined += line + "\n";
@@ -32,7 +35,6 @@ std::string diffEngine::generate_block_hash(const std::vector<std::string> &line
     }
     return Hashing::generate_sha256(combined);
 }
-
 std::vector<Block> diffEngine::parse_file(const std::string &filepath)
 {
     std::string file_content = FileSystem::read_file_to_string(filepath);
@@ -40,7 +42,6 @@ std::vector<Block> diffEngine::parse_file(const std::string &filepath)
         return std::vector<Block>();
     return diffEngine::parse_memory(file_content);
 }
-
 bool diffEngine::is_scope_header(const std::string &raw_line, std::string &out_scope_name)
 {
     size_t start = raw_line.find_first_not_of(" \t\r\n");
@@ -80,7 +81,6 @@ bool diffEngine::is_scope_header(const std::string &raw_line, std::string &out_s
     }
     return false;
 }
-
 std::vector<Block> diffEngine::parse_memory(const std::string &raw_content)
 {
     std::vector<Block> blocks;
@@ -125,7 +125,6 @@ std::vector<Block> diffEngine::parse_memory(const std::string &raw_content)
 
     return blocks;
 }
-
 std::vector<DiffResult> diffEngine::analyze_diff(const std::vector<Block> &old_blocks, const std::vector<Block> &new_blocks)
 {
     std::vector<DiffResult> results;
@@ -226,7 +225,6 @@ std::vector<DiffResult> diffEngine::analyze_diff(const std::vector<Block> &old_b
 
     return results;
 }
-
 static void render_granular_diff(const std::vector<std::string> &old_lines, const std::vector<std::string> &new_lines,int old_start, int new_start,int &lines_ins, int &chars_ins, int &lines_del, int &chars_del){
 
     size_t i = 0, j = 0;
@@ -265,7 +263,6 @@ static void render_granular_diff(const std::vector<std::string> &old_lines, cons
         }
     }
 }
-
 void diffEngine::render_diff(const std::vector<DiffResult> &results, const std::string &fileA, const std::string &fileB)
 {
     std::cout << BOLD << CYAN << "\n┌──────────────────────────────────────────────────────────┐\n";
@@ -351,7 +348,6 @@ void diffEngine::render_diff(const std::vector<DiffResult> &results, const std::
     std::cout << DIM << " ────────────────────────────────────────────────────────\n\n"
               << RESET;
 }
-
 void diffEngine::run_engine_on_file(const std::string &filepath, const std::string &old_content, const std::string &new_content)
 {
     std::vector<Block> old_blocks = parse_memory(old_content);
@@ -365,7 +361,6 @@ void diffEngine::run_engine_on_file(const std::string &filepath, const std::stri
 
     render_diff(results, old_name, new_name);
 }
-
 static string fetch_decompress(const std::string &object_hash)
 {
     if (object_hash.empty())

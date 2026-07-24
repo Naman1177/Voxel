@@ -102,7 +102,6 @@ std::vector<std::string> FileSystem::list_workspace_files()
 
     return file_list;
 }
-
 std::string FileSystem::read_file_to_string(const std::string &path)
 {
     std::ifstream file(path, std::ios::in | std::ios::binary);
@@ -136,7 +135,6 @@ std::unordered_map<std::string, std::string> FileSystem::read_index()
     index_file.close();
     return index_map;
 }
-
 string FileSystem::get_current_active_file()
 {
     string latest_path = "";

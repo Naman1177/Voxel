@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+
 struct Block {
     int start_line;
     int end_line;
@@ -41,6 +42,7 @@ public:
     static void render_diff(const std::vector<DiffResult>& results, const std::string& fileA,  const std::string& fileB);
     static void route_diff(const std::vector<std::string>& args);
     static void ai_diff(const std::vector<std::string> &args);
+
 };
 
 
