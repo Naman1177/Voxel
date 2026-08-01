@@ -726,3 +726,225 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
         ai::run_ai_diff(file, old_content, new_content);
     }
 }
+
+
+// Merge class implementation
+static const string SANDBOX_DIR = ".sandbox_merge";
+string merge::format_branch_name(const std::string &raw_name){
+    string formatted = raw_name;
+    replace(formatted.begin(), formatted.end(), '/', '@');
+    return formatted;
+}
+void merge::execute(const std::string &current_branch, const std::string &incoming_branch){
+    string target_branch = format_branch_name(incoming_branch);
+    string source_branch = format_branch_name(current_branch);
+    cout << "\033[1;36mVoxel Merge: Merging '" << source_branch << "' into '" << target_branch << "'...\033[0m\n";
+    string base_commit = merge::find_lowest_common_ancestor(source_branch, target_branch);
+    if (base_commit.empty()) {
+        std::cerr << "\033[1;31mError: No common ancestor found. Cannot proceed with merge. Try making a commit on both branches.\033[0m\n";
+        return;
+    }
+    if (!setup_sandbox()) return;
+    vector<string> all_files = FileSystem::list_workspace_files();
+    bool has_conflicts = false;
+    for (const auto& file : all_files){
+        string ext = fs::path(file).extension().string();
+        if (Commands::should_ignore_extension(ext)) {
+            //add file system later
+            continue;
+        }
+        bool conflict = process_file_merge(file, target_branch, source_branch, base_commit);
+        if (conflict) {
+            has_conflicts = true;
+        }
+    }
+    if (has_conflicts) {
+        std::cout << "\n\033[1;33mConflicts were resolved in the sandbox.\033[0m\n";
+    }
+    cout << "\n\033[1;32mSandbox merge complete.\033[0m\n";
+    cout << "Type 'yes' to finalize this merge and apply changes to your active workspace: ";
+    
+    string user_confirmation;
+    cin >> user_confirmation;
+    if (user_confirmation == "yes" || user_confirmation == "Yes" || user_confirmation == "YES" || user_confirmation == "y" || user_confirmation == "Y"){
+        apply_sandbox_to_workspace();
+        cout << "\033[1;32mMerge applied successfully! Workspace updated.\033[0m\n";
+    }
+    else {
+        cout << "\033[1;31mMerge aborted by user. Workspace remains untouched.\033[0m\n";
+    }
+    merge::cleanup_sandbox();
+}
+static std::vector<std::string> split_lines(const std::string& text) {
+    std::vector<std::string> lines;
+    std::stringstream ss(text);
+    std::string line;
+    while (std::getline(ss, line)) {
+        lines.push_back(line);
+    }
+    return lines;
+}
+bool merge::process_file_merge(const std::string &filepath, const std::string &target_branch, const std::string &source_branch, const std::string &base_commit) {
+    string base_content = merge::get_file_content_from_commit(base_commit, filepath);
+    string ours_content = FileSystem::read_file_to_string(filepath);
+    string theirs_content = merge::get_file_content_from_commit(merge::get_branch_commit(source_branch), filepath);
+    if (ours_content == theirs_content) {
+        return false;
+    }
+    if (base_content == ours_content && base_content != theirs_content) {
+        fs::path dest = fs::path(SANDBOX_DIR) / filepath;
+        fs::create_directories(dest.parent_path());
+        std::ofstream out(dest);
+        out << theirs_content;
+        return false;
+    }
+    if (base_content == theirs_content && base_content != ours_content) {
+        return false;
+    }
+    std::vector<std::string> base_lines = split_lines(base_content);
+    std::vector<std::string> ours_lines = split_lines(ours_content);
+    std::vector<std::string> theirs_lines = split_lines(theirs_content);
+
+    // Run the Diff3 engine
+    dtl::Diff3<std::string> diff3(base_lines, ours_lines, theirs_lines);
+    diff3.compose();
+
+    if (diff3.merge()) {
+        // DTL successfully merged line-by-line without overlapping conflicts!
+        fs::path dest = fs::path(SANDBOX_DIR) / filepath;
+        fs::create_directories(dest.parent_path());
+        std::ofstream out(dest);
+        
+        // Write the auto-merged lines to the sandbox
+        for (const auto& line : diff3.getMergedSequence()) {
+            out << line << "\n";
+        }
+        return false; // Handled cleanly, no manual conflict!
+    }
+    cout << "\033[1;31mConflict detected in: " << filepath << "\033[0m\n";
+    merge::resolve_conflict_interactive(filepath, ours_content, theirs_content, target_branch, source_branch);
+    return true;
+
+}
+void merge::resolve_conflict_interactive(const std::string &filepath, const std::string &ours_content, const std::string &theirs_content, const std::string &target_branch, const std::string &source_branch) {
+    fs::path dest = fs::path(SANDBOX_DIR) / filepath;
+    fs::create_directories(dest.parent_path());
+    ofstream out(dest);
+    out << "<<<<<<< OURS (" << target_branch << ")\n";
+    out << ours_content;
+    out << "\n=======\n";
+    out << theirs_content;
+    out << "\n>>>>>>> THEIRS (" << source_branch << ")\n";
+    out.close();
+    cout << "--------------------------------------------------\n";
+    cout << "File: " << filepath << " is now in .sandbox_merge/\n";
+    cout << "Please select a resolution:\n";
+    cout << "  [1] Keep OURS\n";
+    cout << "  [2] Keep THEIRS\n";
+    cout << "  [3] Keep BOTH (OURS then THEIRS)\n";
+    cout << "Selection [1-3]: ";
+    int choice = 0;
+    cin >> choice;
+    std::ofstream resolved_out(dest, std::ios::trunc);
+    if (choice == 1) {
+        resolved_out << ours_content;
+    } else if (choice == 2) {
+        resolved_out << theirs_content;
+    } else if (choice == 3) {
+        resolved_out << ours_content << "\n" << theirs_content;
+    } else {
+        cout << "Invalid choice. Defaulting to OURS to protect workspace code.\n";
+        resolved_out << ours_content;
+    }
+    resolved_out.close();
+    cout << "Conflict resolved in sandbox for " << filepath << "\n";
+
+}
+bool merge::setup_sandbox() {
+    try {
+        if (fs::exists(SANDBOX_DIR)) {
+            fs::remove_all(SANDBOX_DIR);
+        }
+        fs::create_directories(SANDBOX_DIR);
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to create sandbox: " << e.what() << "\n";
+        return false;
+    }
+}
+void merge::cleanup_sandbox() {
+    if (fs::exists(SANDBOX_DIR)) {
+        fs::remove_all(SANDBOX_DIR);
+    }
+}
+void merge::apply_sandbox_to_workspace() {
+    for (const auto& entry : fs::recursive_directory_iterator(SANDBOX_DIR)) {
+        if (entry.is_regular_file()) {
+            std::string sandbox_path = entry.path().string();
+            std::string real_path = sandbox_path.substr(SANDBOX_DIR.length() + 1); 
+            fs::copy_file(sandbox_path, real_path, fs::copy_options::overwrite_existing);
+        }
+    }
+}
+std::string merge::get_branch_commit(const std::string& branch_name) {
+    std::string ref_path = ".voxel/refs/heads/" + branch_name;
+    if (fs::exists(ref_path)) {
+        return FileSystem::read_file_to_string(ref_path);
+    }
+    return "";
+}
+string merge::get_file_content_from_commit(const std::string& commit_hash, const std::string& filepath) {
+    if (commit_hash.empty()) return "";
+    string temp_out = ".voxel/tmp_decompress";
+    string obj_path = ".voxel/objects/" + commit_hash;
+    if (fs::exists(obj_path)) {
+        
+        if (Zstd::decompress_file(obj_path, temp_out)) {
+            std::string content = FileSystem::read_file_to_string(temp_out);
+            fs::remove(temp_out);
+            return content;
+        }
+
+    }
+    return "";
+}
+std::string merge::find_lowest_common_ancestor(const std::string& branchA, const std::string& branchB) {
+    std::string commitA = get_branch_commit(branchA);
+    std::string commitB = get_branch_commit(branchB);
+
+    if (commitA.empty() || commitB.empty()) return "";
+    if (commitA == commitB) return commitA; // They are on the exact same commit
+
+    // Fetch the repository graph map
+    std::map<std::string, Commands::CommitNode> graph = Commands::build_complete_repo_graph().second;
+
+    std::set<std::string> history_of_A;
+    std::string currentA = commitA;
+
+    // 1. Walk backward from Branch A to the beginning
+    while (!currentA.empty() && currentA != "NONE") {
+        history_of_A.insert(currentA);
+        if (graph.find(currentA) != graph.end()) {
+            currentA = graph[currentA].parent;
+        } else {
+            break;
+        }
+    }
+
+    // 2. Walk backward from Branch B until a collision with A's history
+    std::string currentB = commitB;
+    while (!currentB.empty() && currentB != "NONE") {
+        if (history_of_A.count(currentB) > 0) {
+            return currentB; // Found the LCA!
+        }
+        if (graph.find(currentB) != graph.end()) {
+            currentB = graph[currentB].parent;
+        } else {
+            break;
+        }
+    }
+
+    return ""; 
+}
+
+    

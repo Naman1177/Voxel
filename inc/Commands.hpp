@@ -34,12 +34,19 @@ public:
     static bool should_ignore_extension(const std::string& ext);
     static void display_diff(const std::string& fileA, const std::string& fileB);
     static void diverge(const std::vector<std::string>& args);
-
-private:
     static std::pair<std::string, std::map<std::string, CommitNode>> build_complete_repo_graph();
+    static void bin_target(const std::vector<std::string>& args);
+    static void revive_target(const std::vector<std::string>& args);
+private:
+    
     static void checkout_files_from_tree(const std::string& tree_hash);
     static bool is_snapshot_empty();
     static string get_user_name();
+    static void bin_commit(const std::string& hash);
+    static void bin_branch(const std::string& branch_name);
+    static std::string trim_whitespace(const std::string& str);
+    static void revive_commit(const std::string& hash);
+    static void revive_branch(const std::string& branch_name);
 
 };
 

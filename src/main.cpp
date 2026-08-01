@@ -306,6 +306,79 @@ int main(int argc, char *argv[]){
         }
         Commands::diverge(args);
     } 
+    else if (command == "merge") {
+        std::string source_branch;
+        std::string target_branch;
+
+        if (argc == 2) {
+            // Case 1: "voxel merge" 
+            // Default behavior: Merge 'main' into current branch
+            source_branch = "main";
+            target_branch = Commands::get_current_branch_name(); //
+        } 
+        else if (argc == 3) {
+            // Case 2: "voxel merge a" 
+            // Merge branch 'a' (source) into current branch (target)
+            source_branch = argv[2];
+            target_branch = Commands::get_current_branch_name(); //[cite: 9]
+        } 
+        else if (argc == 4) {
+            // Case 3: "voxel merge a b" 
+            // Out-of-tree merge: Merge branch 'a' (source) into branch 'b' (target)
+            source_branch = argv[2];
+            target_branch = argv[3];
+        } 
+        else {
+            std::cerr << "\033[1;31mInvalid merge syntax.\033[0m\n";
+            return 1;
+        }
+
+        // Safety Guard 1: Ensure we actually found a target branch
+        if (target_branch.empty()) {
+            std::cerr << "\033[1;31mError: Could not determine the target branch. Are you in a valid Voxel repository?\033[0m\n";
+            return 1;
+        }
+
+        // Safety Guard 2: Prevent merging a branch into itself
+        if (source_branch == target_branch) {
+            std::cout << "\033[1;33mAlready up to date. (Cannot merge '" << source_branch << "' into itself).\033[0m\n";
+            return 0;
+        }
+
+        // Execute the merge pipeline strictly via static method[cite: 10]
+        // Note: diff_merge.hpp signature is execute(current_branch, incoming_branch)
+        merge::execute(target_branch, source_branch); 
+        return 0;
+    }
+    else if (command == "bin") {
+        std::vector<std::string> bin_args;
+        if (argc == 3) {
+            bin_args.push_back(argv[2]);
+        }
+        else{
+            std::cerr << "\033[1;31mError: Invalid bin command usage. Use 'voxel bin <commit_hash>' or 'voxel bin <branch_name>'.\033[0m\n";
+            return 1;
+        }
+        
+        Commands::bin_target(bin_args);
+        return 0;
+    }
+    else if (command == "revive") {
+        std::vector<std::string> revive_args;
+
+        if (argc >= 3) {
+            revive_args.push_back(argv[2]);
+        }
+        
+        Commands::revive_target(revive_args);
+        return 0;
+    }
+    
+    
+    
+    
+    
+    
     
     
     else

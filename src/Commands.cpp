@@ -1087,3 +1087,227 @@ void Commands::diverge(const vector<string>& args){
 
 
 }
+string Commands::trim_whitespace(const string& str) {
+    std::string result = str;
+    result.erase(result.begin(), std::find_if(result.begin(), result.end(), [](unsigned char ch) { return !std::isspace(ch); }));
+    result.erase(std::find_if(result.rbegin(), result.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), result.end());
+    return result;
+}
+void Commands::bin_target(const std::vector<std::string>& args){
+    string target;
+    if (args.empty()) {
+        
+        string current_branch = get_current_branch_name();
+        string ref_path = ".voxel/refs/heads/" + current_branch;
+        if(fs::exists(ref_path)){
+            target = FileSystem::read_file_to_string(ref_path);
+            target = trim_whitespace(target);
+            if (target.length() != 64) {
+                cerr << "\033[1;31mError: Current branch has no valid commit to bin.\033[0m\n";
+                return;
+            }
+            else {
+             cerr << "\033[1;31mError: Cannot find branch reference.\033[0m\n";
+             return;
+            }
+        
+        }
+    }
+    else {
+        
+        target = args[0];
+    }
+    if (target.length() == 64) {
+        bin_commit(target);
+    }
+    else {
+        bin_branch(target);
+    }
+
+    
+}
+void Commands::bin_commit(const std::string& hash) {
+    std::string obj_path = ".voxel/objects/" + hash;
+    if (!std::filesystem::exists(obj_path)) {
+        std::cerr << "\033[1;31mError: Commit hash " << hash << " does not exist.\033[0m\n";
+        return;
+    }
+    std::string temp_file = ".voxel/tmp_bin_rw";
+    std::string content;
+    bool was_compressed = false;
+
+    content = FileSystem::read_file_to_string(obj_path);
+    std::string root_parent = "parent - 0000000000000000000000000000000000000000000000000000000000000000";
+    if (content.find(root_parent) != std::string::npos) {
+        std::cerr << "\033[1;31mError: Cannot bin the root commit. It is the foundation of the repository.\033[0m\n";
+        return;
+    }
+    std::string upper_parent_hash = "";
+    std::string search_str = "parent - ";
+    size_t parent_pos = content.find(search_str);
+    if (parent_pos != std::string::npos) {
+        
+        upper_parent_hash = content.substr(parent_pos + search_str.length(), 64);
+    } else {
+        std::cerr << "\033[1;31mError: Corrupted commit file, no parent found.\033[0m\n";
+        return;
+    }
+
+    if(!fs::exists(".voxel/.bin/objects")){
+        std::filesystem::create_directories(".voxel/.bin/objects");
+    }
+    
+    std::string bin_path = ".voxel/.bin/objects/" + hash;
+    std::filesystem::rename(obj_path, bin_path);
+    std::string old_parent_line = "parent - " + hash;
+    std::string new_parent_line = "parent - " + upper_parent_hash;
+    bool child_found = false;
+
+    for (const auto& entry : std::filesystem::directory_iterator(".voxel/objects")) {
+        if (entry.is_regular_file()) {
+            std::string child_hash = entry.path().filename().string();
+            if (child_hash.length() == 64) {
+                std::string child_path = entry.path().string();
+                std::string child_content;
+                bool child_is_compressed = false;
+                child_content = FileSystem::read_file_to_string(child_path);
+                
+
+                // Check if this object is the child pointing to the binned commit
+                size_t replace_pos = child_content.find(old_parent_line);
+                if (replace_pos != std::string::npos) {
+                    child_found = true;
+                    child_content.replace(replace_pos, old_parent_line.length(), new_parent_line);
+                    
+                    // Save back to disk (Write to temp, then replace original)
+                    std::ofstream out(temp_file, std::ios::trunc);
+                    out << child_content;
+                    out.close();
+                    std::filesystem::rename(temp_file, child_path);
+
+                }
+            }
+        }
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(".voxel/refs/heads")) {
+        if (entry.is_regular_file()) {
+            std::string branch_path = entry.path().string();
+            std::string branch_target = trim_whitespace(FileSystem::read_file_to_string(branch_path));
+            
+            if (branch_target == hash) {
+                std::ofstream out(branch_path, std::ios::trunc);
+                out << upper_parent_hash << "\n";
+                out.close();
+                std::cout << "\033[1;33mBranch tip '" << entry.path().filename().string() << "' updated to upper parent: " << upper_parent_hash.substr(0, 7) << "...\033[0m\n";
+            }
+        }
+    }
+
+    if (child_found) {
+        std::cout << "\033[1;32mCommit " << hash.substr(0, 7) << "... binned. Child commit safely linked to upper parent.\033[0m\n";
+    } else {
+        std::cout << "\033[1;32mCommit " << hash.substr(0, 7) << "... binned.\033[0m\n";
+    }
+}
+void Commands::bin_branch(const std::string& branch_name){
+    if (branch_name == "main") {
+        std::cerr << "\033[1;31mError: You cannot bin the 'main' branch.\033[0m\n";
+        return;
+    }
+    string ref_path = ".voxel/refs/heads/" + branch_name;
+    if(!fs::exists(ref_path)){
+        cerr << "\033[1;31mError: Branch '" << branch_name << "' does not exist.\033[0m\n";
+        return;
+    }
+    if(!fs::exists(".voxel/.bin/refs/heads")){
+        fs::create_directories(".voxel/.bin/refs/heads");
+    }
+    string bin_path = ".voxel/.bin/refs/heads/" + branch_name;
+    fs::rename(ref_path, bin_path);
+    cout << "\033[1;32mBranch '" << branch_name << "' successfully moved to the bin.\033[0m\n";
+    if (get_current_branch_name() == branch_name) {
+        std::cout << "\033[1;33mWarning: You just binned your active branch! Please switch to another branch to continue working.\033[0m\n";
+    }
+}
+void Commands::revive_target(const std::vector<std::string>& args){
+    if (args.empty()) {
+        cerr << "\033[1;31mError: Please specify a branch name or commit hash to revive.\033[0m\n";
+        return;
+    }
+    string target = args[0];
+    if (target.length() == 64) {
+        revive_commit(target);
+    } 
+    else {
+        revive_branch(target);
+    }
+}
+void Commands::revive_branch(const std::string& branch_name){
+    string bin_path = ".voxel/.bin/refs/heads/" + branch_name;
+    if(!fs::exists(bin_path)){
+        cerr << "\033[1;31mError: Branch '" << branch_name << "' not found in the bin.\033[0m\n";
+        return;
+    }
+    string ref_path = ".voxel/refs/heads/" + branch_name;
+    if(fs::exists(ref_path)){
+        cerr << "\033[1;31mError: A branch named '" << branch_name << "' already exists in the active repository.\033[0m\n";
+        return;
+    }
+    fs::rename(bin_path, ref_path);
+    cout << "\033[1;32mBranch '" << branch_name << "' successfully revived from the bin.\033[0m\n";
+}
+void Commands::revive_commit(const std::string& hash){
+    string bin_path = ".voxel/.bin/objects/" + hash;
+    if (!fs::exists(bin_path)) {
+        std::cerr << "\033[1;31mError: Commit hash " << hash << " not found in the bin.\033[0m\n";
+        return;
+    }
+    string content = FileSystem::read_file_to_string(bin_path);
+    string upper_parent_hash = "";
+    std::string search_str = "parent - ";
+    size_t parent_pos = content.find(search_str);
+    if (parent_pos != std::string::npos) {
+        upper_parent_hash = content.substr(parent_pos + search_str.length(), 64);
+    } 
+    else {
+        std::cerr << "\033[1;31mError: Binned commit is corrupted, no parent found.\033[0m\n";
+        return;
+    }
+    string obj_path = ".voxel/objects/" + hash;
+    fs::rename(bin_path, obj_path);
+    string old_parent_line = "parent - " + upper_parent_hash;
+    string new_parent_line = "parent - " + hash;
+    bool child_relinked = false;
+    if (upper_parent_hash != "0000000000000000000000000000000000000000000000000000000000000000") {
+        for (const auto& entry : std::filesystem::directory_iterator(".voxel/objects")) {
+            if (entry.is_regular_file()) {
+                std::string child_hash = entry.path().filename().string();
+                if (child_hash.length() == 64 && child_hash != hash) {
+                    std::string child_path = entry.path().string();
+                    std::string child_content = FileSystem::read_file_to_string(child_path);
+                    size_t replace_pos = child_content.find(old_parent_line);
+                    if (replace_pos != std::string::npos) {
+                        child_relinked = true;
+                        
+                    
+                        child_content.replace(replace_pos, old_parent_line.length(), new_parent_line);
+                        
+                        
+                        std::ofstream out(child_path, std::ios::trunc);
+                        out << child_content;
+                        out.close();
+                        
+                        
+                        break; 
+                    }
+                }
+            }
+        }
+    }
+    if (child_relinked) {
+        cout << "\033[1;32mCommit " << hash.substr(0, 7) << "... revived and child safely re-linked!\033[0m\n";
+    } else {
+        cout << "\033[1;32mCommit " << hash.substr(0, 7) << "... revived to objects.\033[0m\n";
+    }
+
+}

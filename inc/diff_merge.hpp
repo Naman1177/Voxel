@@ -6,7 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
-
+using namespace std;
 struct Block {
     int start_line;
     int end_line;
@@ -45,6 +45,20 @@ public:
 
 };
 
+class merge{
+public:
+    static void execute(const std::string& current_branch, const std::string& incoming_branch);
+private:
+    static bool setup_sandbox();
+    static void cleanup_sandbox();
+    static void apply_sandbox_to_workspace();
+    static string find_lowest_common_ancestor(const std::string& branchA, const std::string& branchB);
+    static string get_branch_commit(const std::string& branch_name);
+    static string get_file_content_from_commit(const std::string& commit_hash, const std::string& filepath);
+    static bool process_file_merge(const std::string& filepath, const std::string& target_branch, const std::string& source_branch, const std::string& base_commit);
+    static void resolve_conflict_interactive(const std::string& filepath, const std::string& ours_content, const std::string& theirs_content, const std::string& target_branch, const std::string& source_branch);
+    static std::string format_branch_name(const std::string& raw_name);
+};
 
 
 
