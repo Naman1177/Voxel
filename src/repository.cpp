@@ -3,14 +3,17 @@
 #include <filesystem>
 #include <fstream>
 #include "ai.hpp"
+#include "Commands.hpp"
 
 namespace fs = std::filesystem;
 
 bool Repository::init_repository(){
+
     std::string root_dir = ".voxel";
     std::string objects_dir = root_dir + "/objects";
     std::string refs_dir = root_dir + "/refs/heads";
     std::string snapshot_dir = root_dir + "/snapshot";
+    Commands::setup_global_identity();
     if (fs::exists(root_dir)) {
         std::cout << "\033[31mError: A Voxel repository already exists in this directory.\033[0m\n";
         return false;

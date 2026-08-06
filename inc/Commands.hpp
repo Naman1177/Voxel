@@ -37,8 +37,10 @@ public:
     static std::pair<std::string, std::map<std::string, CommitNode>> build_complete_repo_graph();
     static void bin_target(const std::vector<std::string>& args);
     static void revive_target(const std::vector<std::string>& args);
+    static void setup_global_identity();
+    static void who();
 private:
-    
+    static string get_hardware_uuid();
     static void checkout_files_from_tree(const std::string& tree_hash);
     static bool is_snapshot_empty();
     static string get_user_name();

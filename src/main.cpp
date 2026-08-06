@@ -373,7 +373,10 @@ int main(int argc, char *argv[]){
         Commands::revive_target(revive_args);
         return 0;
     }
-    
+    else if (command == "who") {
+        Commands::who();
+        return 0;
+    }
     
     
     
@@ -393,11 +396,11 @@ int main(int argc, char *argv[]){
     
 
 //big file slicing
-//maybe a save when cmd+s pressed invissible save
+
 //imp cloud sharing on same wifi collab
 //more good voxelignore
 //mbedtls with hardware crypto sign
-//bin for branches
+
 //may diff user experience
 //lens features
 //file that have all list of dependencies and workspace environment

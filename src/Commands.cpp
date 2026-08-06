@@ -1257,6 +1257,7 @@ void Commands::revive_branch(const std::string& branch_name){
     cout << "\033[1;32mBranch '" << branch_name << "' successfully revived from the bin.\033[0m\n";
 }
 void Commands::revive_commit(const std::string& hash){
+
     string bin_path = ".voxel/.bin/objects/" + hash;
     if (!fs::exists(bin_path)) {
         std::cerr << "\033[1;31mError: Commit hash " << hash << " not found in the bin.\033[0m\n";
@@ -1310,4 +1311,94 @@ void Commands::revive_commit(const std::string& hash){
         cout << "\033[1;32mCommit " << hash.substr(0, 7) << "... revived to objects.\033[0m\n";
     }
 
+
+}
+string Commands::get_hardware_uuid(){
+    string result = "";
+    #ifdef __APPLE__
+        array<char, 128> buffer;
+        unique_ptr<FILE, decltype(&pclose)> pipe(popen("ioreg -rd1 -c IOPlatformExpertDevice | grep IOPlatformUUID", "r"), pclose);
+        if (!pipe) {
+            return "UNKNOWN_SILICON";
+        }
+        while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+            result += buffer.data();
+        }
+        size_t first_quote = result.find('\"', result.find("IOPlatformUUID") + 15);
+        size_t last_quote = result.find('\"', first_quote + 1);
+        if (first_quote != std::string::npos && last_quote != std::string::npos) {
+            return result.substr(first_quote + 1, last_quote - first_quote - 1);
+        }
+    #elif __linux__
+        ifstream machine_id_file("/etc/machine-id");
+        if (machine_id_file.is_open()) {
+            std::getline(machine_id_file, result);
+            machine_id_file.close();
+            result.erase(result.find_last_not_of(" \n\r\t") + 1);
+            return result;
+        }
+    
+    
+    
+    #endif
+    return "UNKNOWN_SILICON";
+}
+void Commands::setup_global_identity(){
+    const char* home_dir = getenv("HOME");
+    if (!home_dir) {
+        std::cerr << "\033[1;31mError: Could not locate HOME directory for global identity.\033[0m\n";
+        return;
+    }
+    string identity_path = string(home_dir) + "/.voxel_identity";
+    if (fs::exists(identity_path)) {
+        return; 
+    }
+    cout << "\033[1;34mGenerating permanent Voxel Node ID from Silicon...\033[0m\n";
+    string raw_uuid = get_hardware_uuid();
+    string salted_uuid = raw_uuid + "_voxel_p2p_node";
+    string final_node_id = Hashing::generate_sha256(salted_uuid);
+    ofstream out(identity_path);
+    if (out.is_open()) {
+        out << final_node_id;
+        out.close();
+        std::cout << "\033[1;32mNode Identity established: " << final_node_id.substr(0, 10) << "...\033[0m\n";
+    } else {
+        std::cerr << "\033[1;31mError: Failed to write global identity file.\033[0m\n";
+    }
+}
+void Commands::who(){
+    const char* home_dir = getenv("HOME");
+    if (!home_dir) {
+        std::cerr << "\033[1;31mError: Could not locate HOME directory.\033[0m\n";
+        return;
+    }
+    string identity_path = std::string(home_dir) + "/.voxel_identity";
+    if (!fs::exists(identity_path)) {
+        std::cerr << "\033[1;31mError: Node identity missing. Run 'voxel init' to initialize!\033[0m\n";
+        return;
+    }
+    string hardware_id = trim_whitespace(FileSystem::read_file_to_string(identity_path));
+    string config_path = ".voxel/config";
+    string username = "Not Set";
+    string email = "Not Set";
+    if (fs::exists(config_path)) {
+        std::ifstream config_file(config_path);
+        std::string line;
+        while (std::getline(config_file, line)) {
+            if (line.find("username=") == 0) {
+                username = line.substr(9); // Extract everything after "username="
+            } else if (line.find("email=") == 0) {
+                email = line.substr(6);    // Extract everything after "email="
+            }
+        }
+        config_file.close();
+    }
+    else {
+        cout << "\033[1;33mWarning: Config file not found. Run 'voxel init' and 'voxel login' to set your identity?\033[0m\n";
+    }
+    cout << "\033[1;36m================ VOXEL IDENTITY ================\033[0m\n";
+    cout << "\033[1;37mUsername:\033[0m    " << username << "\n";
+    cout << "\033[1;37mEmail:\033[0m       " << email << "\n";
+    cout << "\033[1;37mHardware ID:\033[0m " << hardware_id << "\n";
+    cout << "\033[1;36m================================================\033[0m\n";
 }
