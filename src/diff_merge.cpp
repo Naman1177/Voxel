@@ -912,18 +912,14 @@ std::string merge::get_branch_commit(const std::string& branch_name) {
 }
 string merge::get_file_content_from_commit(const std::string& commit_hash, const std::string& filepath) {
     if (commit_hash.empty()) return "";
-    string temp_out = ".voxel/tmp_decompress";
-    string obj_path = ".voxel/objects/" + commit_hash;
-    if (fs::exists(obj_path)) {
-        
-        if (Zstd::decompress_file(obj_path, temp_out)) {
-            std::string content = FileSystem::read_file_to_string(temp_out);
-            fs::remove(temp_out);
-            return content;
-        }
- 
-    }
-    return "";
+
+    // commit_hash points at the COMMIT object, not a file blob.
+    // Resolve the specific blob hash for `filepath` inside this commit's
+    // tree first, then decompress THAT blob.
+    std::string blob_hash = get_file_blob_hash_from_commit(commit_hash, filepath);
+    if (blob_hash.empty()) return "";
+
+    return fetch_decompress(blob_hash);
 }
 std::string merge::find_lowest_common_ancestor(const std::string& branchA, const std::string& branchB) {
     std::string commitA = get_branch_commit(branchA);
