@@ -361,19 +361,22 @@ void diffEngine::run_engine_on_file(const std::string &filepath, const std::stri
 
     render_diff(results, old_name, new_name);
 }
-static string fetch_decompress(const std::string &object_hash)
-{
-    if (object_hash.empty())
-        return "";
+static string fetch_decompress(const std::string &object_hash) {
+    if (object_hash.empty()) return "";
+    
     string src_path = ".voxel/objects/" + object_hash;
     string tmp_path = ".voxel/tmp_diff_" + object_hash;
-    if (Zstd::decompress_file(src_path, tmp_path))
-    {
-
-        std::string content = FileSystem::read_file_to_string(tmp_path);
-        fs::remove(tmp_path);
-        return content;
+    
+    if (fs::exists(src_path)) {
+        
+        if (Zstd::decompress_file(src_path, tmp_path)) {
+            std::string content = FileSystem::read_file_to_string(tmp_path);
+            fs::remove(tmp_path);
+            return content;
+        }
+        return FileSystem::read_file_to_string(src_path);
     }
+    
     return "";
 }
 static std::string read_first_line(const std::string &path)
@@ -501,66 +504,50 @@ static std::string find_root_commit(std::string current_commit_hash)
     }
     return prev_hash;
 }
-static std::string get_file_blob_hash_from_commit(const std::string &commit_hash, const std::string &filepath)
-{
-    if (commit_hash.empty())
-        return "";
+static std::string get_file_blob_hash_from_commit(const std::string &commit_hash, const std::string &filepath) {
+    if (commit_hash.empty()) return "";
 
-    // 1. Read the Commit Object (Plain text)
     std::string commit_path = ".voxel/objects/" + commit_hash;
-    if (!std::filesystem::exists(commit_path))
-        return "";
+    if (!std::filesystem::exists(commit_path)) return "";
+    
     std::string commit_data = FileSystem::read_file_to_string(commit_path);
-
-    // 2. Find the 'tree - ' line, which points to your saved Index Copy hash
     std::istringstream commit_stream(commit_data);
     std::string line;
     std::string index_copy_hash = "";
 
-    while (std::getline(commit_stream, line))
-    {
-        if (line.find("tree - ") == 0)
-        {
-            index_copy_hash = line.substr(7); // "tree - " is 7 chars
-            // Trim whitespace
+    // 1. Get the Tree Index hash
+    while (std::getline(commit_stream, line)) {
+        if (line.find("tree - ") == 0) {
+            index_copy_hash = line.substr(7);
             index_copy_hash.erase(index_copy_hash.find_last_not_of(" \n\r\t") + 1);
             break;
         }
     }
 
-    if (index_copy_hash.empty())
-        return "";
+    if (index_copy_hash.empty()) return "";
 
-    // 3. Read the Index Copy object directly
     std::string index_path = ".voxel/objects/" + index_copy_hash;
-    if (!std::filesystem::exists(index_path))
-        return "";
+    if (!std::filesystem::exists(index_path)) return "";
+    
     std::string index_data = FileSystem::read_file_to_string(index_path);
-
-    // 4. Parse the Index Copy for the file mapping
-    // This file contains: "filepath hash" (or similar)
     std::istringstream index_stream(index_data);
-    while (std::getline(index_stream, line))
-    {
-        // If the line contains our filename
-        if (line.find(filepath) != std::string::npos)
-        {
+    
+    // 2. Extract just the filename to match safely regardless of how Voxel stores the path
+    std::string target_filename = std::filesystem::path(filepath).filename().string();
 
-            // Extract the 64-character hash from this line
+    while (std::getline(index_stream, line)) {
+        // Search using the clean filename
+        if (line.find(target_filename) != std::string::npos) {
             std::istringstream line_stream(line);
             std::string word;
-            while (line_stream >> word)
-            {
-                // Return the hash as soon as we find the 64-char string
-                if (word.length() == 64)
-                {
-                    return word;
+            while (line_stream >> word) {
+                if (word.length() == 64) {
+                    return word; // Successfully found the Blob Hash
                 }
             }
         }
     }
-
-    return ""; // File wasn't in this index
+    return ""; 
 }
 void diffEngine::route_diff(const std::vector<std::string> &args)
 {
@@ -727,17 +714,21 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
     }
 }
 
-
 // Merge class implementation
-static const string SANDBOX_DIR = ".sandbox_merge";
+static const string SANDBOX_DIR = "sandbox_merge";
 string merge::format_branch_name(const std::string &raw_name){
     string formatted = raw_name;
     replace(formatted.begin(), formatted.end(), '/', '@');
     return formatted;
 }
 void merge::execute(const std::string &current_branch, const std::string &incoming_branch){
-    string target_branch = format_branch_name(incoming_branch);
-    string source_branch = format_branch_name(current_branch);
+    // target_branch = branch we are merging INTO (your current/active branch)
+    // source_branch = branch we are merging FROM (the incoming branch)
+    // NOTE: these two were previously swapped, which caused process_file_merge()
+    // to fetch "theirs" content from the current branch instead of the incoming
+    // branch, and caused the OURS/THEIRS labels in conflict markers to be wrong.
+    string target_branch = format_branch_name(current_branch);
+    string source_branch = format_branch_name(incoming_branch);
     cout << "\033[1;36mVoxel Merge: Merging '" << source_branch << "' into '" << target_branch << "'...\033[0m\n";
     string base_commit = merge::find_lowest_common_ancestor(source_branch, target_branch);
     if (base_commit.empty()) {
@@ -788,10 +779,25 @@ bool merge::process_file_merge(const std::string &filepath, const std::string &t
     string base_content = merge::get_file_content_from_commit(base_commit, filepath);
     string ours_content = FileSystem::read_file_to_string(filepath);
     string theirs_content = merge::get_file_content_from_commit(merge::get_branch_commit(source_branch), filepath);
+ 
+#ifdef VOXEL_MERGE_DEBUG
+    cout << "[merge-debug] " << filepath << "\n"
+         << "  base_commit hash : " << base_commit << "\n"
+         << "  base   (" << base_content.size()   << " bytes): " << base_content   << "\n"
+         << "  ours   (" << ours_content.size()   << " bytes): " << ours_content   << "\n"
+         << "  theirs (" << theirs_content.size() << " bytes): " << theirs_content << "\n";
+#endif
+ 
     if (ours_content == theirs_content) {
+#ifdef VOXEL_MERGE_DEBUG
+        cout << "  -> path: ours == theirs, nothing to do\n";
+#endif
         return false;
     }
     if (base_content == ours_content && base_content != theirs_content) {
+#ifdef VOXEL_MERGE_DEBUG
+        cout << "  -> path: fast-forward, take THEIRS\n";
+#endif
         fs::path dest = fs::path(SANDBOX_DIR) / filepath;
         fs::create_directories(dest.parent_path());
         std::ofstream out(dest);
@@ -799,16 +805,27 @@ bool merge::process_file_merge(const std::string &filepath, const std::string &t
         return false;
     }
     if (base_content == theirs_content && base_content != ours_content) {
+#ifdef VOXEL_MERGE_DEBUG
+        cout << "  -> path: fast-forward, keep OURS (theirs never changed this file)\n";
+#endif
         return false;
     }
+#ifdef VOXEL_MERGE_DEBUG
+    cout << "  -> path: running dtl::Diff3 (both sides changed)\n";
+#endif
     std::vector<std::string> base_lines = split_lines(base_content);
     std::vector<std::string> ours_lines = split_lines(ours_content);
     std::vector<std::string> theirs_lines = split_lines(theirs_content);
-
-    // Run the Diff3 engine
-    dtl::Diff3<std::string> diff3(base_lines, ours_lines, theirs_lines);
+ 
+    // Run the Diff3 engine.
+    // IMPORTANT: dtl::Diff3's signature is Diff3(A, B, C) where B (the MIDDLE
+    // argument) is the common ancestor that A and C are each diffed against
+    // internally (diff_ba = diff(B,A), diff_bc = diff(B,C)). base_lines must
+    // go in the middle slot, not the first one, or the merge logic computes
+    // everything relative to the wrong reference point.
+    dtl::Diff3<std::string> diff3(ours_lines, base_lines, theirs_lines);
     diff3.compose();
-
+ 
     if (diff3.merge()) {
         // DTL successfully merged line-by-line without overlapping conflicts!
         fs::path dest = fs::path(SANDBOX_DIR) / filepath;
@@ -824,7 +841,7 @@ bool merge::process_file_merge(const std::string &filepath, const std::string &t
     cout << "\033[1;31mConflict detected in: " << filepath << "\033[0m\n";
     merge::resolve_conflict_interactive(filepath, ours_content, theirs_content, target_branch, source_branch);
     return true;
-
+ 
 }
 void merge::resolve_conflict_interactive(const std::string &filepath, const std::string &ours_content, const std::string &theirs_content, const std::string &target_branch, const std::string &source_branch) {
     fs::path dest = fs::path(SANDBOX_DIR) / filepath;
@@ -858,7 +875,7 @@ void merge::resolve_conflict_interactive(const std::string &filepath, const std:
     }
     resolved_out.close();
     cout << "Conflict resolved in sandbox for " << filepath << "\n";
-
+ 
 }
 bool merge::setup_sandbox() {
     try {
@@ -904,23 +921,23 @@ string merge::get_file_content_from_commit(const std::string& commit_hash, const
             fs::remove(temp_out);
             return content;
         }
-
+ 
     }
     return "";
 }
 std::string merge::find_lowest_common_ancestor(const std::string& branchA, const std::string& branchB) {
     std::string commitA = get_branch_commit(branchA);
     std::string commitB = get_branch_commit(branchB);
-
+ 
     if (commitA.empty() || commitB.empty()) return "";
     if (commitA == commitB) return commitA; // They are on the exact same commit
-
+ 
     // Fetch the repository graph map
     std::map<std::string, Commands::CommitNode> graph = Commands::build_complete_repo_graph().second;
-
+ 
     std::set<std::string> history_of_A;
     std::string currentA = commitA;
-
+ 
     // 1. Walk backward from Branch A to the beginning
     while (!currentA.empty() && currentA != "NONE") {
         history_of_A.insert(currentA);
@@ -930,7 +947,7 @@ std::string merge::find_lowest_common_ancestor(const std::string& branchA, const
             break;
         }
     }
-
+ 
     // 2. Walk backward from Branch B until a collision with A's history
     std::string currentB = commitB;
     while (!currentB.empty() && currentB != "NONE") {
@@ -943,8 +960,8 @@ std::string merge::find_lowest_common_ancestor(const std::string& branchA, const
             break;
         }
     }
-
+ 
     return ""; 
 }
 
-    
+   
