@@ -8,6 +8,7 @@
 #include "Commands.hpp"
 #include "ai.hpp"
 #include "diff_merge.hpp"
+#include "cloud.hpp"
 namespace fs = std::filesystem;
 using namespace std;
 
@@ -377,8 +378,23 @@ int main(int argc, char *argv[]){
         Commands::who();
         return 0;
     }
-    
-    
+    else if (command == "pack") {
+        vector<string> pack_args;
+        for (int i = 2; i < argc; ++i) {
+            pack_args.push_back(argv[i]);
+        }
+        Cloud::pack_repository(pack_args);
+        return 0;
+    }
+    else if (command == "unpack") {
+        if (argc < 3) {
+            std::cerr << "\033[1;31mError: Please provide the payload filename (e.g., voxel unpack name.vxlpack).\033[0m\n";
+            return 1;
+        }
+        string payload_filename = argv[2];
+        Cloud::unpack_repository(payload_filename);
+        return 0;
+    }
     
     
     
