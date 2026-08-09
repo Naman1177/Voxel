@@ -42,6 +42,7 @@ public:
     static void render_diff(const std::vector<DiffResult>& results, const std::string& fileA,  const std::string& fileB);
     static void route_diff(const std::vector<std::string>& args);
     static void ai_diff(const std::vector<std::string> &args);
+    static void report_media_file_diff(const std::string &file,const std::string &old_content,const std::string &new_content, bool old_existed, bool new_existed);
 
 };
 
@@ -56,7 +57,7 @@ private:
     static string get_branch_commit(const std::string& branch_name);
     static string get_file_content_from_commit(const std::string& commit_hash, const std::string& filepath);
     static bool process_file_merge(const std::string& filepath, const std::string& target_branch, const std::string& source_branch, const std::string& base_commit);
-    static void resolve_conflict_interactive(const std::string& filepath, const std::string& ours_content, const std::string& theirs_content, const std::string& target_branch, const std::string& source_branch);
+    static void resolve_conflict_interactive(const std::string &filepath,const std::vector<std::string> &base_lines,const std::vector<std::string> &ours_lines,const std::vector<std::string> &theirs_lines,const std::string &target_branch,const std::string &source_branch);
     static std::string format_branch_name(const std::string& raw_name);
 };
 

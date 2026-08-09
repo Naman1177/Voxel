@@ -200,7 +200,6 @@ string ai::sendToAI::transmit(const string &url, const string &headers, const st
     fs::remove(in_cache);
     return buffer.str();
 }
-
 static nlohmann::json find_key_recursive(const nlohmann::json &j, const string &key)
 {
     if (j.is_object())
@@ -236,7 +235,6 @@ std::unordered_map<std::string, std::string> parse_tree_content(const std::strin
     }
     return map;
 }
-
 string ai::sendToAI::clean_json_response(const string &raw_json, const string &key_token)
 {
     string clean_string = raw_json;

@@ -8,6 +8,7 @@
 #include <sstream>
 #include <iostream>
 #include <unordered_set>
+#include <set>
 #include "ai.hpp"
 #include "../third_party_lib/dtl/dtl.hpp"
 namespace fs = std::filesystem;
@@ -549,6 +550,36 @@ static std::string get_file_blob_hash_from_commit(const std::string &commit_hash
     }
     return ""; 
 }
+void diffEngine::report_media_file_diff(const std::string &file,
+                                         const std::string &old_content,
+                                         const std::string &new_content,
+                                         bool old_existed, bool new_existed)
+{
+    if (!old_existed && new_existed)
+    {
+        cout << GREEN << "[+ ADDED]   " << file << RESET
+             << "  (media file, " << new_content.size() << " bytes)\n";
+    }
+    else if (old_existed && !new_existed)
+    {
+        cout << RED << "[- DELETED] " << file << RESET
+             << "  (media file, was " << old_content.size() << " bytes)\n";
+    }
+    else if (old_existed && new_existed)
+    {
+        if (old_content.size() != new_content.size())
+        {
+            cout << YELLOW << "[~ MODIFIED]" << RESET << " " << file
+                 << "  (media file, " << old_content.size() << " -> " << new_content.size() << " bytes)\n";
+        }
+        else
+        {
+            cout << CYAN << "[= UNCHANGED]" << RESET << " " << file
+                 << "  (media file, " << old_content.size() << " bytes)\n";
+        }
+    }
+    // If neither side existed there's nothing meaningful to report.
+}
 void diffEngine::route_diff(const std::vector<std::string> &args)
 {
     vector<string> all_files = FileSystem::list_workspace_files();
@@ -602,23 +633,27 @@ void diffEngine::route_diff(const std::vector<std::string> &args)
     }
     for (const auto &file : all_files)
     {
-        if (Commands::should_ignore_extension(file))
-        {
-            continue;
-        }
         string old_content = "";
         string new_content = "";
+        bool old_existed = false;
+        bool new_existed = false;
+
         if (!left_commit_hash.empty())
         {
             string file_blob_hash = get_file_blob_hash_from_commit(left_commit_hash, file);
             if (!file_blob_hash.empty())
             {
                 old_content = fetch_decompress(file_blob_hash);
+                old_existed = true;
             }
         }
         if (right_commit_hash == "WORKSPACE")
         {
-            new_content = FileSystem::read_file_to_string(file);
+            if (fs::exists(file))
+            {
+                new_content = FileSystem::read_file_to_string(file);
+                new_existed = true;
+            }
         }
         else if (!right_commit_hash.empty())
         {
@@ -626,8 +661,16 @@ void diffEngine::route_diff(const std::vector<std::string> &args)
             if (!file_blob_hash.empty())
             {
                 new_content = fetch_decompress(file_blob_hash);
+                new_existed = true;
             }
         }
+
+        if (Commands::should_ignore_extension(fs::path(file).extension().string()))
+        {
+            diffEngine::report_media_file_diff(file, old_content, new_content, old_existed, new_existed);
+            continue;
+        }
+
         diffEngine::run_engine_on_file(file, old_content, new_content);
     }
 }
@@ -684,23 +727,27 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
     }
     for (const auto &file : all_files)
     {
-        if (Commands::should_ignore_extension(file))
-        {
-            continue;
-        }
         string old_content = "";
         string new_content = "";
+        bool old_existed = false;
+        bool new_existed = false;
+
         if (!left_commit_hash.empty())
         {
             string file_blob_hash = get_file_blob_hash_from_commit(left_commit_hash, file);
             if (!file_blob_hash.empty())
             {
                 old_content = fetch_decompress(file_blob_hash);
+                old_existed = true;
             }
         }
         if (right_commit_hash == "WORKSPACE")
         {
-            new_content = FileSystem::read_file_to_string(file);
+            if (fs::exists(file))
+            {
+                new_content = FileSystem::read_file_to_string(file);
+                new_existed = true;
+            }
         }
         else if (!right_commit_hash.empty())
         {
@@ -708,10 +755,197 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
             if (!file_blob_hash.empty())
             {
                 new_content = fetch_decompress(file_blob_hash);
+                new_existed = true;
             }
         }
+
+        if (Commands::should_ignore_extension(fs::path(file).extension().string()))
+        {
+            diffEngine::report_media_file_diff(file, old_content, new_content, old_existed, new_existed);
+            continue;
+        }
+
         ai::run_ai_diff(file, old_content, new_content);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Minimal 3-way conflict rendering.
+//
+// dtl::Diff3::merge() only tells us success/failure; it doesn't expose a
+// stable, version-independent way to get per-line "which side changed what"
+// info for the conflict case. So when a conflict happens we run our own
+// lightweight LCS-based line diff (base vs ours, base vs theirs) and use it
+// to split the file into pieces that are either common to both, changed on
+// only one side (auto-applied, no conflict), or genuinely changed on both
+// sides (wrapped in <<<<<<< / ======= / >>>>>>> markers). This is what
+// prevents unchanged context lines (e.g. "Line 2: Base") from being dumped
+// twice into the conflict markers.
+// ---------------------------------------------------------------------------
+struct MergeOpcode {
+    enum Tag { EQUAL, CHANGE } tag;
+    size_t a1, a2; // range in `base`  [a1, a2)
+    size_t b1, b2; // range in `other` [b1, b2)
+};
+
+// LCS-based line diff describing how `base` becomes `other`.
+static std::vector<MergeOpcode> merge_diff_opcodes(const std::vector<std::string> &base,
+                                                     const std::vector<std::string> &other) {
+    size_t n = base.size(), m = other.size();
+    std::vector<std::vector<int>> dp(n + 1, std::vector<int>(m + 1, 0));
+    for (size_t i = n; i-- > 0;)
+        for (size_t j = m; j-- > 0;)
+            dp[i][j] = (base[i] == other[j]) ? dp[i + 1][j + 1] + 1
+                                              : std::max(dp[i + 1][j], dp[i][j + 1]);
+
+    std::vector<MergeOpcode> ops;
+    size_t i = 0, j = 0, ca = 0, cb = 0;
+    auto flush = [&](size_t a1, size_t a2, size_t b1, size_t b2) {
+        if (a1 != a2 || b1 != b2) ops.push_back({MergeOpcode::CHANGE, a1, a2, b1, b2});
+    };
+    while (i < n && j < m) {
+        if (base[i] == other[j]) {
+            flush(ca, i, cb, j);
+            size_t si = i, sj = j;
+            while (i < n && j < m && base[i] == other[j]) { i++; j++; }
+            ops.push_back({MergeOpcode::EQUAL, si, i, sj, j});
+            ca = i; cb = j;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            i++;
+        } else {
+            j++;
+        }
+    }
+    flush(ca, n, cb, m);
+    return ops;
+}
+
+// p is "covered" by an opcode if it falls in [a1,a2); a zero-width insert
+// (a1 == a2, i.e. pure addition with nothing deleted) is treated as covering
+// exactly the point p == a1.
+static MergeOpcode::Tag merge_find_status(const std::vector<MergeOpcode> &ops, size_t p) {
+    for (const auto &op : ops) {
+        if (op.a1 == op.a2) { if (op.a1 == p) return MergeOpcode::CHANGE; }
+        else if (op.a1 <= p && p < op.a2) return op.tag;
+    }
+    return MergeOpcode::EQUAL;
+}
+
+// Reconstructs what `side` contributes for base range [rs, re). rs == re
+// only happens for the dedicated end-of-file trailing-insert segment (see
+// build_three_way_pieces); every other call has rs < re.
+static std::vector<std::string> merge_extract_side_text(const std::vector<std::string> &base,
+                                                          const std::vector<std::string> &side,
+                                                          const std::vector<MergeOpcode> &ops,
+                                                          size_t rs, size_t re) {
+    std::vector<std::string> out;
+    for (const auto &op : ops) {
+        if (op.a1 == op.a2) {
+            bool included = (rs < re) ? (op.a1 >= rs && op.a1 < re) : (op.a1 == rs);
+            if (included) for (size_t k = op.b1; k < op.b2; k++) out.push_back(side[k]);
+            continue;
+        }
+        if (op.a2 <= rs || op.a1 >= re) continue;
+        if (op.tag == MergeOpcode::EQUAL) {
+            size_t s = std::max(op.a1, rs), e = std::min(op.a2, re);
+            for (size_t k = s; k < e; k++) out.push_back(base[k]);
+        } else {
+            for (size_t k = op.b1; k < op.b2; k++) out.push_back(side[k]);
+        }
+    }
+    return out;
+}
+
+struct MergePiece {
+    enum Kind { COMMON, OURS_ONLY, THEIRS_ONLY, CONFLICT } kind;
+    std::vector<std::string> ours_lines;
+    std::vector<std::string> theirs_lines;
+};
+
+static void merge_classify_and_push(std::vector<MergePiece> &pieces,
+                                     const std::vector<std::string> &base,
+                                     const std::vector<std::string> &ours,
+                                     const std::vector<std::string> &theirs,
+                                     const std::vector<MergeOpcode> &ops_o,
+                                     const std::vector<MergeOpcode> &ops_t,
+                                     size_t seg_start, size_t seg_end,
+                                     bool o_changed, bool t_changed, bool &has_conflict) {
+    std::vector<std::string> ours_text = merge_extract_side_text(base, ours, ops_o, seg_start, seg_end);
+    std::vector<std::string> theirs_text = merge_extract_side_text(base, theirs, ops_t, seg_start, seg_end);
+    MergePiece piece;
+    if ((!o_changed && !t_changed) || ours_text == theirs_text) {
+        piece.kind = MergePiece::COMMON;
+        piece.ours_lines = ours_text;
+    } else if (!t_changed) {
+        piece.kind = MergePiece::OURS_ONLY;
+        piece.ours_lines = ours_text;
+    } else if (!o_changed) {
+        piece.kind = MergePiece::THEIRS_ONLY;
+        piece.theirs_lines = theirs_text;
+    } else {
+        piece.kind = MergePiece::CONFLICT;
+        piece.ours_lines = ours_text;
+        piece.theirs_lines = theirs_text;
+        has_conflict = true;
+    }
+    pieces.push_back(piece);
+}
+
+// Walks base/ours/theirs together and groups them into minimal common /
+// one-sided-change / conflicting pieces, instead of dumping the entire
+// ours/theirs file into every conflict block.
+static std::vector<MergePiece> build_three_way_pieces(const std::vector<std::string> &base,
+                                                        const std::vector<std::string> &ours,
+                                                        const std::vector<std::string> &theirs,
+                                                        bool &has_conflict) {
+    std::vector<MergeOpcode> ops_o = merge_diff_opcodes(base, ours);
+    std::vector<MergeOpcode> ops_t = merge_diff_opcodes(base, theirs);
+    has_conflict = false;
+    size_t n = base.size();
+
+    std::set<size_t> cut_set{0, n};
+    for (const auto &op : ops_o) { cut_set.insert(op.a1); cut_set.insert(op.a2); }
+    for (const auto &op : ops_t) { cut_set.insert(op.a1); cut_set.insert(op.a2); }
+    std::vector<size_t> cuts(cut_set.begin(), cut_set.end());
+
+    std::vector<MergePiece> pieces;
+    size_t idx = 0;
+    while (idx + 1 < cuts.size()) {
+        size_t seg_start = cuts[idx];
+        MergeOpcode::Tag o_tag = merge_find_status(ops_o, seg_start);
+        MergeOpcode::Tag t_tag = merge_find_status(ops_t, seg_start);
+        bool changed = (o_tag != MergeOpcode::EQUAL || t_tag != MergeOpcode::EQUAL);
+
+        size_t seg_end = cuts[idx + 1];
+        size_t j = idx + 1;
+        if (changed) {
+            // Merge consecutive changed cut-segments into a single piece so we
+            // don't split one logical edit into several conflict blocks.
+            while (j + 1 < cuts.size()) {
+                size_t next_start = cuts[j];
+                MergeOpcode::Tag no_tag = merge_find_status(ops_o, next_start);
+                MergeOpcode::Tag nt_tag = merge_find_status(ops_t, next_start);
+                if (no_tag == MergeOpcode::EQUAL && nt_tag == MergeOpcode::EQUAL) break;
+                seg_end = cuts[j + 1];
+                j++;
+            }
+        }
+        merge_classify_and_push(pieces, base, ours, theirs, ops_o, ops_t, seg_start, seg_end,
+                                 o_tag != MergeOpcode::EQUAL, t_tag != MergeOpcode::EQUAL, has_conflict);
+        idx = j;
+    }
+
+    // A trailing insert-only change at end-of-file (a1 == n) never becomes a
+    // segment start in the loop above (all segment starts are < n), so handle
+    // it as one extra, dedicated final segment.
+    bool o_trail = false, t_trail = false;
+    for (const auto &op : ops_o) if (op.a1 == op.a2 && op.a1 == n) o_trail = true;
+    for (const auto &op : ops_t) if (op.a1 == op.a2 && op.a1 == n) t_trail = true;
+    if (o_trail || t_trail) {
+        merge_classify_and_push(pieces, base, ours, theirs, ops_o, ops_t, n, n, o_trail, t_trail, has_conflict);
+    }
+
+    return pieces;
 }
 
 // Merge class implementation
@@ -838,44 +1072,89 @@ bool merge::process_file_merge(const std::string &filepath, const std::string &t
         }
         return false; // Handled cleanly, no manual conflict!
     }
-    cout << "\033[1;31mConflict detected in: " << filepath << "\033[0m\n";
-    merge::resolve_conflict_interactive(filepath, ours_content, theirs_content, target_branch, source_branch);
+    merge::resolve_conflict_interactive(filepath, base_lines, ours_lines, theirs_lines, target_branch, source_branch);
     return true;
  
 }
-void merge::resolve_conflict_interactive(const std::string &filepath, const std::string &ours_content, const std::string &theirs_content, const std::string &target_branch, const std::string &source_branch) {
+void merge::resolve_conflict_interactive(const std::string &filepath,
+                                          const std::vector<std::string> &base_lines,
+                                          const std::vector<std::string> &ours_lines,
+                                          const std::vector<std::string> &theirs_lines,
+                                          const std::string &target_branch,
+                                          const std::string &source_branch) {
+    bool has_conflict = false;
+    std::vector<MergePiece> pieces = build_three_way_pieces(base_lines, ours_lines, theirs_lines, has_conflict);
+
     fs::path dest = fs::path(SANDBOX_DIR) / filepath;
     fs::create_directories(dest.parent_path());
-    ofstream out(dest);
-    out << "<<<<<<< OURS (" << target_branch << ")\n";
-    out << ours_content;
-    out << "\n=======\n";
-    out << theirs_content;
-    out << "\n>>>>>>> THEIRS (" << source_branch << ")\n";
-    out.close();
+
+    cout << "\033[1;31mConflict detected in: " << filepath << "\033[0m\n";
+
+    // Phase 1: write the file with markers around ONLY the real conflicting
+    // hunks (unchanged and one-sided-change lines are auto-applied) so the
+    // person can review it in their editor before choosing a resolution.
+    {
+        std::ofstream out(dest, std::ios::trunc);
+        for (const auto &piece : pieces) {
+            switch (piece.kind) {
+                case MergePiece::COMMON:
+                case MergePiece::OURS_ONLY:
+                    for (const auto &l : piece.ours_lines) out << l << "\n";
+                    break;
+                case MergePiece::THEIRS_ONLY:
+                    for (const auto &l : piece.theirs_lines) out << l << "\n";
+                    break;
+                case MergePiece::CONFLICT:
+                    out << "<<<<<<< OURS (" << target_branch << ") (Current Change)\n";
+                    for (const auto &l : piece.ours_lines) out << l << "\n";
+                    out << "=======\n";
+                    for (const auto &l : piece.theirs_lines) out << l << "\n";
+                    out << ">>>>>>> THEIRS (" << source_branch << ") (Incoming Change)\n";
+                    break;
+            }
+        }
+    }
+
     cout << "--------------------------------------------------\n";
-    cout << "File: " << filepath << " is now in .sandbox_merge/\n";
-    cout << "Please select a resolution:\n";
+    cout << "File: " << filepath << " is now in " << SANDBOX_DIR << "/\n";
+    cout << "Please select a resolution for the conflicting section(s):\n";
     cout << "  [1] Keep OURS\n";
     cout << "  [2] Keep THEIRS\n";
     cout << "  [3] Keep BOTH (OURS then THEIRS)\n";
     cout << "Selection [1-3]: ";
     int choice = 0;
     cin >> choice;
+
+    // Phase 2: rewrite with just the CONFLICT pieces resolved per the choice.
+    // COMMON / OURS_ONLY / THEIRS_ONLY pieces are already correctly merged
+    // and are left untouched by the choice.
     std::ofstream resolved_out(dest, std::ios::trunc);
-    if (choice == 1) {
-        resolved_out << ours_content;
-    } else if (choice == 2) {
-        resolved_out << theirs_content;
-    } else if (choice == 3) {
-        resolved_out << ours_content << "\n" << theirs_content;
-    } else {
-        cout << "Invalid choice. Defaulting to OURS to protect workspace code.\n";
-        resolved_out << ours_content;
+    for (const auto &piece : pieces) {
+        switch (piece.kind) {
+            case MergePiece::COMMON:
+            case MergePiece::OURS_ONLY:
+                for (const auto &l : piece.ours_lines) resolved_out << l << "\n";
+                break;
+            case MergePiece::THEIRS_ONLY:
+                for (const auto &l : piece.theirs_lines) resolved_out << l << "\n";
+                break;
+            case MergePiece::CONFLICT:
+                if (choice == 1) {
+                    for (const auto &l : piece.ours_lines) resolved_out << l << "\n";
+                } else if (choice == 2) {
+                    for (const auto &l : piece.theirs_lines) resolved_out << l << "\n";
+                } else if (choice == 3) {
+                    for (const auto &l : piece.ours_lines) resolved_out << l << "\n";
+                    for (const auto &l : piece.theirs_lines) resolved_out << l << "\n";
+                } else {
+                    cout << "Invalid choice. Defaulting to OURS to protect workspace code.\n";
+                    for (const auto &l : piece.ours_lines) resolved_out << l << "\n";
+                }
+                break;
+        }
     }
     resolved_out.close();
     cout << "Conflict resolved in sandbox for " << filepath << "\n";
- 
 }
 bool merge::setup_sandbox() {
     try {
@@ -913,9 +1192,14 @@ std::string merge::get_branch_commit(const std::string& branch_name) {
 string merge::get_file_content_from_commit(const std::string& commit_hash, const std::string& filepath) {
     if (commit_hash.empty()) return "";
 
-    // commit_hash points at the COMMIT object, not a file blob.
-    // Resolve the specific blob hash for `filepath` inside this commit's
-    // tree first, then decompress THAT blob.
+    // NOTE: commit_hash points at the COMMIT object, not a file blob.
+    // We must first resolve the specific blob hash for `filepath` inside
+    // this commit's tree (same lookup diff already does), then decompress
+    // THAT blob. Previously this function tried to decompress the commit
+    // object itself and ignored filepath entirely, which meant it always
+    // returned "" for every file, tricking process_file_merge() into
+    // thinking "theirs never changed this file" for everything and never
+    // writing anything into sandbox_merge/.
     std::string blob_hash = get_file_blob_hash_from_commit(commit_hash, filepath);
     if (blob_hash.empty()) return "";
 
@@ -959,5 +1243,3 @@ std::string merge::find_lowest_common_ancestor(const std::string& branchA, const
  
     return ""; 
 }
-
-   
