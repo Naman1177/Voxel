@@ -51,7 +51,6 @@ std::vector<std::string> FileSystem::list_workspace_files()
 
     try
     {
-        // 🔄 Switch to an explicit iterator to control kernel traversal depth
         for (auto it = fs::recursive_directory_iterator(current_dir); it != fs::recursive_directory_iterator(); ++it)
         {
             fs::path relative_path = it->path().lexically_relative(current_dir);
@@ -62,7 +61,7 @@ std::vector<std::string> FileSystem::list_workspace_files()
             if (it->is_directory())
             {
                 std::string dir_name = it->path().filename().string();
-                if (dir_name == ".voxel" || dir_name == ".git" || dir_name == ".vscode")
+                if (dir_name == ".voxel" || dir_name == ".git" || dir_name == "sandbox_merge")
                 {
                     it.disable_recursion_pending(); // Tells the OS: Do not open or look inside this folder!
                     continue;

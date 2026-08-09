@@ -23,8 +23,7 @@ using namespace std;
 
 
 
-std::string diffEngine::generate_block_hash(const std::vector<std::string> &lines)
-{
+std::string diffEngine::generate_block_hash(const std::vector<std::string> &lines){
     std::string combined = "";
     for (const auto &line : lines)
     {
@@ -550,10 +549,7 @@ static std::string get_file_blob_hash_from_commit(const std::string &commit_hash
     }
     return ""; 
 }
-void diffEngine::report_media_file_diff(const std::string &file,
-                                         const std::string &old_content,
-                                         const std::string &new_content,
-                                         bool old_existed, bool new_existed)
+void diffEngine::report_media_file_diff(const std::string &file,const std::string &old_content,const std::string &new_content,bool old_existed, bool new_existed)
 {
     if (!old_existed && new_existed)
     {
@@ -769,28 +765,15 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Minimal 3-way conflict rendering.
-//
-// dtl::Diff3::merge() only tells us success/failure; it doesn't expose a
-// stable, version-independent way to get per-line "which side changed what"
-// info for the conflict case. So when a conflict happens we run our own
-// lightweight LCS-based line diff (base vs ours, base vs theirs) and use it
-// to split the file into pieces that are either common to both, changed on
-// only one side (auto-applied, no conflict), or genuinely changed on both
-// sides (wrapped in <<<<<<< / ======= / >>>>>>> markers). This is what
-// prevents unchanged context lines (e.g. "Line 2: Base") from being dumped
-// twice into the conflict markers.
-// ---------------------------------------------------------------------------
+//merge engine
 struct MergeOpcode {
     enum Tag { EQUAL, CHANGE } tag;
-    size_t a1, a2; // range in `base`  [a1, a2)
-    size_t b1, b2; // range in `other` [b1, b2)
+    size_t a1, a2; 
+    size_t b1, b2; 
 };
 
-// LCS-based line diff describing how `base` becomes `other`.
-static std::vector<MergeOpcode> merge_diff_opcodes(const std::vector<std::string> &base,
-                                                     const std::vector<std::string> &other) {
+static const string SANDBOX_DIR = "sandbox_merge";
+static std::vector<MergeOpcode> merge_diff_opcodes(const std::vector<std::string> &base,const std::vector<std::string> &other) {
     size_t n = base.size(), m = other.size();
     std::vector<std::vector<int>> dp(n + 1, std::vector<int>(m + 1, 0));
     for (size_t i = n; i-- > 0;)
@@ -819,10 +802,6 @@ static std::vector<MergeOpcode> merge_diff_opcodes(const std::vector<std::string
     flush(ca, n, cb, m);
     return ops;
 }
-
-// p is "covered" by an opcode if it falls in [a1,a2); a zero-width insert
-// (a1 == a2, i.e. pure addition with nothing deleted) is treated as covering
-// exactly the point p == a1.
 static MergeOpcode::Tag merge_find_status(const std::vector<MergeOpcode> &ops, size_t p) {
     for (const auto &op : ops) {
         if (op.a1 == op.a2) { if (op.a1 == p) return MergeOpcode::CHANGE; }
@@ -830,14 +809,7 @@ static MergeOpcode::Tag merge_find_status(const std::vector<MergeOpcode> &ops, s
     }
     return MergeOpcode::EQUAL;
 }
-
-// Reconstructs what `side` contributes for base range [rs, re). rs == re
-// only happens for the dedicated end-of-file trailing-insert segment (see
-// build_three_way_pieces); every other call has rs < re.
-static std::vector<std::string> merge_extract_side_text(const std::vector<std::string> &base,
-                                                          const std::vector<std::string> &side,
-                                                          const std::vector<MergeOpcode> &ops,
-                                                          size_t rs, size_t re) {
+static std::vector<std::string> merge_extract_side_text(const std::vector<std::string> &base,const std::vector<std::string> &side,const std::vector<MergeOpcode> &ops,size_t rs, size_t re) {
     std::vector<std::string> out;
     for (const auto &op : ops) {
         if (op.a1 == op.a2) {
@@ -855,21 +827,12 @@ static std::vector<std::string> merge_extract_side_text(const std::vector<std::s
     }
     return out;
 }
-
 struct MergePiece {
     enum Kind { COMMON, OURS_ONLY, THEIRS_ONLY, CONFLICT } kind;
     std::vector<std::string> ours_lines;
     std::vector<std::string> theirs_lines;
 };
-
-static void merge_classify_and_push(std::vector<MergePiece> &pieces,
-                                     const std::vector<std::string> &base,
-                                     const std::vector<std::string> &ours,
-                                     const std::vector<std::string> &theirs,
-                                     const std::vector<MergeOpcode> &ops_o,
-                                     const std::vector<MergeOpcode> &ops_t,
-                                     size_t seg_start, size_t seg_end,
-                                     bool o_changed, bool t_changed, bool &has_conflict) {
+static void merge_classify_and_push(std::vector<MergePiece> &pieces,const std::vector<std::string> &base,const std::vector<std::string> &ours,const std::vector<std::string> &theirs,const std::vector<MergeOpcode> &ops_o,const std::vector<MergeOpcode> &ops_t,size_t seg_start, size_t seg_end,bool o_changed, bool t_changed, bool &has_conflict) {
     std::vector<std::string> ours_text = merge_extract_side_text(base, ours, ops_o, seg_start, seg_end);
     std::vector<std::string> theirs_text = merge_extract_side_text(base, theirs, ops_t, seg_start, seg_end);
     MergePiece piece;
@@ -890,14 +853,7 @@ static void merge_classify_and_push(std::vector<MergePiece> &pieces,
     }
     pieces.push_back(piece);
 }
-
-// Walks base/ours/theirs together and groups them into minimal common /
-// one-sided-change / conflicting pieces, instead of dumping the entire
-// ours/theirs file into every conflict block.
-static std::vector<MergePiece> build_three_way_pieces(const std::vector<std::string> &base,
-                                                        const std::vector<std::string> &ours,
-                                                        const std::vector<std::string> &theirs,
-                                                        bool &has_conflict) {
+static std::vector<MergePiece> build_three_way_pieces(const std::vector<std::string> &base,const std::vector<std::string> &ours,const std::vector<std::string> &theirs,bool &has_conflict) {
     std::vector<MergeOpcode> ops_o = merge_diff_opcodes(base, ours);
     std::vector<MergeOpcode> ops_t = merge_diff_opcodes(base, theirs);
     has_conflict = false;
@@ -947,20 +903,11 @@ static std::vector<MergePiece> build_three_way_pieces(const std::vector<std::str
 
     return pieces;
 }
-
-// Merge class implementation
-static const string SANDBOX_DIR = "sandbox_merge";
 string merge::format_branch_name(const std::string &raw_name){
     string formatted = raw_name;
-    replace(formatted.begin(), formatted.end(), '/', '@');
     return formatted;
 }
 void merge::execute(const std::string &current_branch, const std::string &incoming_branch){
-    // target_branch = branch we are merging INTO (your current/active branch)
-    // source_branch = branch we are merging FROM (the incoming branch)
-    // NOTE: these two were previously swapped, which caused process_file_merge()
-    // to fetch "theirs" content from the current branch instead of the incoming
-    // branch, and caused the OURS/THEIRS labels in conflict markers to be wrong.
     string target_branch = format_branch_name(current_branch);
     string source_branch = format_branch_name(incoming_branch);
     cout << "\033[1;36mVoxel Merge: Merging '" << source_branch << "' into '" << target_branch << "'...\033[0m\n";
@@ -1076,12 +1023,7 @@ bool merge::process_file_merge(const std::string &filepath, const std::string &t
     return true;
  
 }
-void merge::resolve_conflict_interactive(const std::string &filepath,
-                                          const std::vector<std::string> &base_lines,
-                                          const std::vector<std::string> &ours_lines,
-                                          const std::vector<std::string> &theirs_lines,
-                                          const std::string &target_branch,
-                                          const std::string &source_branch) {
+void merge::resolve_conflict_interactive(const std::string &filepath,const std::vector<std::string> &base_lines,const std::vector<std::string> &ours_lines,const std::vector<std::string> &theirs_lines,const std::string &target_branch,const std::string &source_branch) {
     bool has_conflict = false;
     std::vector<MergePiece> pieces = build_three_way_pieces(base_lines, ours_lines, theirs_lines, has_conflict);
 
@@ -1192,14 +1134,6 @@ std::string merge::get_branch_commit(const std::string& branch_name) {
 string merge::get_file_content_from_commit(const std::string& commit_hash, const std::string& filepath) {
     if (commit_hash.empty()) return "";
 
-    // NOTE: commit_hash points at the COMMIT object, not a file blob.
-    // We must first resolve the specific blob hash for `filepath` inside
-    // this commit's tree (same lookup diff already does), then decompress
-    // THAT blob. Previously this function tried to decompress the commit
-    // object itself and ignored filepath entirely, which meant it always
-    // returned "" for every file, tricking process_file_merge() into
-    // thinking "theirs never changed this file" for everything and never
-    // writing anything into sandbox_merge/.
     std::string blob_hash = get_file_blob_hash_from_commit(commit_hash, filepath);
     if (blob_hash.empty()) return "";
 
@@ -1227,8 +1161,6 @@ std::string merge::find_lowest_common_ancestor(const std::string& branchA, const
             break;
         }
     }
- 
-    // 2. Walk backward from Branch B until a collision with A's history
     std::string currentB = commitB;
     while (!currentB.empty() && currentB != "NONE") {
         if (history_of_A.count(currentB) > 0) {
@@ -1243,3 +1175,4 @@ std::string merge::find_lowest_common_ancestor(const std::string& branchA, const
  
     return ""; 
 }
+

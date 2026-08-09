@@ -58,7 +58,6 @@ void Commands::track_all_files()
 {
     string index_path = ".voxel/index";
     string objects_dir = ".voxel/objects";
-    //fs::create_directories(objects_dir);
     vector<string> files = FileSystem::list_workspace_files();
     ofstream index_file(index_path, ios::trunc);
     if (!index_file.is_open())
@@ -82,12 +81,10 @@ void Commands::track_all_files()
             
             if (Commands::should_ignore_extension(ext)) 
             {
-                // Media Assets: Direct binary transfer to vault
                 fs::copy_file(file, object_file_path, fs::copy_options::overwrite_existing);
             }
             else 
             {
-                // Text/Code Assets: Compress right away with Zstd!
                 Zstd::compress_file(file, object_file_path);
             }
         }
@@ -1361,7 +1358,7 @@ void Commands::setup_global_identity(){
     if (out.is_open()) {
         out << final_node_id;
         out.close();
-        std::cout << "\033[1;32mNode Identity established: " << final_node_id.substr(0, 10) << "...\033[0m\n";
+        std::cout << "\033[1;32mYour Hardware ID: " << final_node_id.substr(0, 10) << "...\033[0m\n";
     } else {
         std::cerr << "\033[1;31mError: Failed to write global identity file.\033[0m\n";
     }
@@ -1402,3 +1399,4 @@ void Commands::who(){
     cout << "\033[1;37mHardware ID:\033[0m " << hardware_id << "\n";
     cout << "\033[1;36m================================================\033[0m\n";
 }
+
