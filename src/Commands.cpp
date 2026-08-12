@@ -28,7 +28,7 @@ namespace fs = std::filesystem;
 #define BOLD        "\033[1m"
 #define DIM         "\033[2m"
 
-string get_current_timestamp()
+string Commands::get_current_timestamp()
 {
     auto now = std::chrono::system_clock::now();
     auto in_time_t = std::chrono::system_clock::to_time_t(now);

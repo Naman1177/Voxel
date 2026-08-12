@@ -395,7 +395,27 @@ int main(int argc, char *argv[]){
         Cloud::unpack_repository(payload_filename);
         return 0;
     }
-    
+    else if (command == "host") {
+        vector<string> args;
+        for (int i = 2; i < argc; ++i) {
+            args.push_back(argv[i]);
+        }
+        Cloud::host_mesh(args);
+    }  
+    else if (command == "client") {
+        vector<string> args;
+        for (int i = 2; i < argc; ++i) {
+            args.push_back(argv[i]);
+        }
+        Cloud::client_mesh(args);
+    }  
+    else if (command == "meshoff") {
+        vector<string> args;
+        for (int i = 2; i < argc; ++i) {
+            args.push_back(argv[i]);
+        }
+        Cloud::mesh_off(args);
+    }
     
     
     

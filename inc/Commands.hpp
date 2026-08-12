@@ -19,6 +19,7 @@ public:
         std::set<std::string> branches; // Branch tracking flags anchored here
         std::vector<std::string> children; // Forward links mapped out by engine
     };
+    static string get_current_timestamp();
     static void track_all_files();
     static void commit_changes(const std::string& message);
     static void create_branch(const std::string& branch_name);

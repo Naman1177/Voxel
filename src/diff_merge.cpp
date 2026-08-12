@@ -771,7 +771,6 @@ struct MergeOpcode {
     size_t a1, a2; 
     size_t b1, b2; 
 };
-
 static const string SANDBOX_DIR = "sandbox_merge";
 static std::vector<MergeOpcode> merge_diff_opcodes(const std::vector<std::string> &base,const std::vector<std::string> &other) {
     size_t n = base.size(), m = other.size();
