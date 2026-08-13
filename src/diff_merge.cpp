@@ -23,32 +23,32 @@ using namespace std;
 
 
 
-std::string diffEngine::generate_block_hash(const std::vector<std::string> &lines){
-    std::string combined = "";
+string diffEngine::generate_block_hash(const vector<string> &lines){
+    string combined = "";
     for (const auto &line : lines)
     {
     
-        if (line.find_first_not_of(" \t\r\n") != std::string::npos)
+        if (line.find_first_not_of(" \t\r\n") != string::npos)
         {
             combined += line + "\n";
         }
     }
     return Hashing::generate_sha256(combined);
 }
-std::vector<Block> diffEngine::parse_file(const std::string &filepath)
+vector<Block> diffEngine::parse_file(const string &filepath)
 {
-    std::string file_content = FileSystem::read_file_to_string(filepath);
+    string file_content = FileSystem::read_file_to_string(filepath);
     if (file_content.empty())
-        return std::vector<Block>();
+        return vector<Block>();
     return diffEngine::parse_memory(file_content);
 }
-bool diffEngine::is_scope_header(const std::string &raw_line, std::string &out_scope_name)
+bool diffEngine::is_scope_header(const string &raw_line, string &out_scope_name)
 {
     size_t start = raw_line.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos)
+    if (start == string::npos)
         return false;
 
-    std::string line = raw_line.substr(start);
+    string line = raw_line.substr(start);
 
     // Sniff for Structural Keywords (Python & C++ friendly)
     if (line.find("def ") == 0 || line.find("class ") == 0 ||
@@ -81,20 +81,20 @@ bool diffEngine::is_scope_header(const std::string &raw_line, std::string &out_s
     }
     return false;
 }
-std::vector<Block> diffEngine::parse_memory(const std::string &raw_content)
+vector<Block> diffEngine::parse_memory(const string &raw_content)
 {
-    std::vector<Block> blocks;
-    std::stringstream stream(raw_content);
-    std::string line;
+    vector<Block> blocks;
+    stringstream stream(raw_content);
+    string line;
 
     int line_num = 1;
     Block current_block;
     current_block.start_line = 1;
     current_block.scope = "Global Scope";
 
-    std::string scope_name;
+    string scope_name;
 
-    while (std::getline(stream, line))
+    while (getline(stream, line))
     {
         // If we hit a new structural header, package the old block and start a new one
         if (is_scope_header(line, scope_name))
@@ -125,11 +125,11 @@ std::vector<Block> diffEngine::parse_memory(const std::string &raw_content)
 
     return blocks;
 }
-std::vector<DiffResult> diffEngine::analyze_diff(const std::vector<Block> &old_blocks, const std::vector<Block> &new_blocks)
+vector<DiffResult> diffEngine::analyze_diff(const vector<Block> &old_blocks, const vector<Block> &new_blocks)
 {
-    std::vector<DiffResult> results;
-    std::vector<bool> old_matched(old_blocks.size(), false);
-    std::vector<bool> new_matched(new_blocks.size(), false);
+    vector<DiffResult> results;
+    vector<bool> old_matched(old_blocks.size(), false);
+    vector<bool> new_matched(new_blocks.size(), false);
 
     // Pass 1: Exact structural identity match (Same scope name)
     for (size_t i = 0; i < old_blocks.size(); i++)
@@ -174,9 +174,9 @@ std::vector<DiffResult> diffEngine::analyze_diff(const std::vector<Block> &old_b
             for (const auto &old_line : old_blocks[i].lines)
             {
                 // Ignore whitespace lines for the similarity check
-                if (old_line.find_first_not_of(" \t\r\n") != std::string::npos)
+                if (old_line.find_first_not_of(" \t\r\n") != string::npos)
                 {
-                    if (std::find(new_blocks[j].lines.begin(), new_blocks[j].lines.end(), old_line) != new_blocks[j].lines.end())
+                    if (find(new_blocks[j].lines.begin(), new_blocks[j].lines.end(), old_line) != new_blocks[j].lines.end())
                     {
                         shared_lines++;
                     }
@@ -225,7 +225,7 @@ std::vector<DiffResult> diffEngine::analyze_diff(const std::vector<Block> &old_b
 
     return results;
 }
-static void render_granular_diff(const std::vector<std::string> &old_lines, const std::vector<std::string> &new_lines,int old_start, int new_start,int &lines_ins, int &chars_ins, int &lines_del, int &chars_del){
+static void render_granular_diff(const vector<string> &old_lines, const vector<string> &new_lines,int old_start, int new_start,int &lines_ins, int &chars_ins, int &lines_del, int &chars_del){
 
     size_t i = 0, j = 0;
 
@@ -238,13 +238,13 @@ static void render_granular_diff(const std::vector<std::string> &old_lines, cons
             j++;
         }
         else if (i < old_lines.size() && (j >= new_lines.size() ||
-                                          std::find(new_lines.begin() + j, new_lines.end(), old_lines[i]) == new_lines.end()))
+                                          find(new_lines.begin() + j, new_lines.end(), old_lines[i]) == new_lines.end()))
         {
 
             // DELETED LINE: Only process if it's NOT just whitespace
-            if (old_lines[i].find_first_not_of(" \t\r\n") != std::string::npos)
+            if (old_lines[i].find_first_not_of(" \t\r\n") != string::npos)
             {
-                std::cout << DIM << std::setw(4) << (old_start + i) << " │ " << RESET << RED << "- " << old_lines[i] << RESET << "\n";
+                cout << DIM << setw(4) << (old_start + i) << " │ " << RESET << RED << "- " << old_lines[i] << RESET << "\n";
                 lines_del++;
                 chars_del += old_lines[i].length();
             }
@@ -253,9 +253,9 @@ static void render_granular_diff(const std::vector<std::string> &old_lines, cons
         else
         {
             // ADDED LINE: Only process if it's NOT just whitespace
-            if (new_lines[j].find_first_not_of(" \t\r\n") != std::string::npos)
+            if (new_lines[j].find_first_not_of(" \t\r\n") != string::npos)
             {
-                std::cout << DIM << std::setw(4) << (new_start + j) << " │ " << RESET << GREEN << "+ " << new_lines[j] << RESET << "\n";
+                cout << DIM << setw(4) << (new_start + j) << " │ " << RESET << GREEN << "+ " << new_lines[j] << RESET << "\n";
                 lines_ins++;
                 chars_ins += new_lines[j].length();
             }
@@ -263,11 +263,11 @@ static void render_granular_diff(const std::vector<std::string> &old_lines, cons
         }
     }
 }
-void diffEngine::render_diff(const std::vector<DiffResult> &results, const std::string &fileA, const std::string &fileB)
+void diffEngine::render_diff(const vector<DiffResult> &results, const string &fileA, const string &fileB)
 {
-    std::cout << BOLD << CYAN << "\n┌──────────────────────────────────────────────────────────┐\n";
-    std::cout << "│  VOXEL DIFF GRAPH: " << fileA << " ➔ " << fileB << "\n";
-    std::cout << "└──────────────────────────────────────────────────────────┘\n"
+    cout << BOLD << CYAN << "\n┌──────────────────────────────────────────────────────────┐\n";
+    cout << "│  VOXEL DIFF GRAPH: " << fileA << " ➔ " << fileB << "\n";
+    cout << "└──────────────────────────────────────────────────────────┘\n"
               << RESET;
 
     int lines_inserted = 0, chars_inserted = 0;
@@ -283,8 +283,8 @@ void diffEngine::render_diff(const std::vector<DiffResult> &results, const std::
 
         if (res.type == MODIFIED)
         {
-            std::cout << "\nScope: " << BOLD << res.new_block.scope << RESET << "  " << YELLOW << "[MODIFIED]" << RESET << "\n";
-            std::cout << DIM << " ────────────────────────────────────────────────────────\n"
+            cout << "\nScope: " << BOLD << res.new_block.scope << RESET << "  " << YELLOW << "[MODIFIED]" << RESET << "\n";
+            cout << DIM << " ────────────────────────────────────────────────────────\n"
                       << RESET;
 
             render_granular_diff(res.old_block.lines, res.new_block.lines,
@@ -294,35 +294,35 @@ void diffEngine::render_diff(const std::vector<DiffResult> &results, const std::
         else if (res.type == ADDED){
             
                  
-            std::cout << "\nScope: " << BOLD << res.new_block.scope << RESET << "  " << GREEN << "[ADDED]" << RESET << "\n";
-            std::cout << DIM << " ────────────────────────────────────────────────────────\n"
+            cout << "\nScope: " << BOLD << res.new_block.scope << RESET << "  " << GREEN << "[ADDED]" << RESET << "\n";
+            cout << DIM << " ────────────────────────────────────────────────────────\n"
                       << RESET;
             int ln = res.new_block.start_line;
             for (const auto &line : res.new_block.lines){
             
-                if (line.find_first_not_of(" \t\r\n") == std::string::npos) {
+                if (line.find_first_not_of(" \t\r\n") == string::npos) {
                     ln++; 
                     continue; 
                 }
 
-                std::cout << DIM << std::setw(4) << ln++ << " | " << RESET << GREEN << "+ " << line << RESET << "\n";
+                cout << DIM << setw(4) << ln++ << " | " << RESET << GREEN << "+ " << line << RESET << "\n";
                 lines_inserted++;
                 chars_inserted += line.length();
             }
         }
         else if (res.type == DELETED)
         {
-            std::cout << "\nScope: " << BOLD << res.old_block.scope << RESET << "  " << RED << "[DELETED]" << RESET << "\n";
-            std::cout << DIM << " ────────────────────────────────────────────────────────\n"
+            cout << "\nScope: " << BOLD << res.old_block.scope << RESET << "  " << RED << "[DELETED]" << RESET << "\n";
+            cout << DIM << " ────────────────────────────────────────────────────────\n"
                       << RESET;
             int ln = res.old_block.start_line;
             for (const auto &line : res.old_block.lines){
-                if (line.find_first_not_of(" \t\r\n") == std::string::npos) {
+                if (line.find_first_not_of(" \t\r\n") == string::npos) {
                     ln++; 
                     continue; 
                 }
 
-                std::cout << DIM << std::setw(4) << ln++ << " | " << RESET << RED << "- " << line << RESET << "\n";
+                cout << DIM << setw(4) << ln++ << " | " << RESET << RED << "- " << line << RESET << "\n";
                 lines_deleted++;
                 chars_deleted += line.length();
             }
@@ -331,37 +331,37 @@ void diffEngine::render_diff(const std::vector<DiffResult> &results, const std::
 
     if (!has_changes)
     {
-        std::cout << "\n"
+        cout << "\n"
                   << DIM << "  No structural changes detected." << RESET << "\n";
     }
 
     // SUMMARY FOOTER
-    std::cout << "\n"
+    cout << "\n"
               << DIM << " ────────────────────────────────────────────────────────\n"
               << RESET;
-    std::cout << BOLD << "DIFF SUMMARY:\n"
+    cout << BOLD << "DIFF SUMMARY:\n"
               << RESET;
-    std::cout << GREEN << "    + " << lines_inserted << " lines inserted (" << chars_inserted << " characters)\n"
+    cout << GREEN << "    + " << lines_inserted << " lines inserted (" << chars_inserted << " characters)\n"
               << RESET;
-    std::cout << RED << "    - " << lines_deleted << " lines deleted  (" << chars_deleted << " characters)\n"
+    cout << RED << "    - " << lines_deleted << " lines deleted  (" << chars_deleted << " characters)\n"
               << RESET;
-    std::cout << DIM << " ────────────────────────────────────────────────────────\n\n"
+    cout << DIM << " ────────────────────────────────────────────────────────\n\n"
               << RESET;
 }
-void diffEngine::run_engine_on_file(const std::string &filepath, const std::string &old_content, const std::string &new_content)
+void diffEngine::run_engine_on_file(const string &filepath, const string &old_content, const string &new_content)
 {
-    std::vector<Block> old_blocks = parse_memory(old_content);
-    std::vector<Block> new_blocks = parse_memory(new_content);
+    vector<Block> old_blocks = parse_memory(old_content);
+    vector<Block> new_blocks = parse_memory(new_content);
 
-    std::vector<DiffResult> results = analyze_diff(old_blocks, new_blocks);
+    vector<DiffResult> results = analyze_diff(old_blocks, new_blocks);
 
     // File names for UI
-    std::string old_name = filepath + " (Old)";
-    std::string new_name = filepath + " (New)";
+    string old_name = filepath + " (Old)";
+    string new_name = filepath + " (New)";
 
     render_diff(results, old_name, new_name);
 }
-static string fetch_decompress(const std::string &object_hash) {
+static string fetch_decompress(const string &object_hash) {
     if (object_hash.empty()) return "";
     
     string src_path = ".voxel/objects/" + object_hash;
@@ -370,7 +370,7 @@ static string fetch_decompress(const std::string &object_hash) {
     if (fs::exists(src_path)) {
         
         if (Zstd::decompress_file(src_path, tmp_path)) {
-            std::string content = FileSystem::read_file_to_string(tmp_path);
+            string content = FileSystem::read_file_to_string(tmp_path);
             fs::remove(tmp_path);
             return content;
         }
@@ -379,19 +379,19 @@ static string fetch_decompress(const std::string &object_hash) {
     
     return "";
 }
-static std::string read_first_line(const std::string &path)
+static string read_first_line(const string &path)
 {
-    std::ifstream file(path);
-    std::string line;
+    ifstream file(path);
+    string line;
     if (file.is_open())
     {
-        std::getline(file, line);
+        getline(file, line);
     }
     return line;
 }
-static std::string get_branch_latest_commit(const std::string &branch_name)
+static string get_branch_latest_commit(const string &branch_name)
 {
-    std::string ref_path = ".voxel/refs/heads/" + branch_name;
+    string ref_path = ".voxel/refs/heads/" + branch_name;
     if (!fs::exists(ref_path))
     {
         cout << RED << "Error: Branch '" << branch_name << "' does not exist.\n"
@@ -400,29 +400,29 @@ static std::string get_branch_latest_commit(const std::string &branch_name)
     }
     return read_first_line(ref_path);
 }
-static std::string find_branch_base_commit(std::string branch_tip_hash)
+static string find_branch_base_commit(string branch_tip_hash)
 {
 
-    std::string trunk_tip_hash = get_branch_latest_commit("main");
+    string trunk_tip_hash = get_branch_latest_commit("main");
     if (trunk_tip_hash.empty())
         return branch_tip_hash;
 
-    std::unordered_set<std::string> trunk_history;
+    unordered_set<string> trunk_history;
 
-    std::string current = trunk_tip_hash;
+    string current = trunk_tip_hash;
     while (!current.empty())
     {
         trunk_history.insert(current);
-        std::string commit_path = ".voxel/objects/" + current;
-        if (!std::filesystem::exists(commit_path))
+        string commit_path = ".voxel/objects/" + current;
+        if (!fs::exists(commit_path))
             break;
 
-        std::string commit_data = FileSystem::read_file_to_string(commit_path);
-        std::istringstream stream(commit_data);
-        std::string line;
-        std::string parent = "";
+        string commit_data = FileSystem::read_file_to_string(commit_path);
+        istringstream stream(commit_data);
+        string line;
+        string parent = "";
 
-        while (std::getline(stream, line))
+        while (getline(stream, line))
         {
             if (line.find("parent - ") == 0)
             {
@@ -434,7 +434,7 @@ static std::string find_branch_base_commit(std::string branch_tip_hash)
     }
 
     current = branch_tip_hash;
-    std::string last_valid = current;
+    string last_valid = current;
 
     while (!current.empty())
     {
@@ -445,16 +445,16 @@ static std::string find_branch_base_commit(std::string branch_tip_hash)
 
         last_valid = current;
 
-        std::string commit_path = ".voxel/objects/" + current;
-        if (!std::filesystem::exists(commit_path))
+        string commit_path = ".voxel/objects/" + current;
+        if (!filesystem::exists(commit_path))
             break;
 
-        std::string commit_data = FileSystem::read_file_to_string(commit_path);
-        std::istringstream stream(commit_data);
-        std::string line;
-        std::string parent = "";
+        string commit_data = FileSystem::read_file_to_string(commit_path);
+        istringstream stream(commit_data);
+        string line;
+        string parent = "";
 
-        while (std::getline(stream, line))
+        while (getline(stream, line))
         {
             if (line.find("parent - ") == 0)
             {
@@ -466,7 +466,7 @@ static std::string find_branch_base_commit(std::string branch_tip_hash)
     }
     return last_valid;
 }
-static std::string resolve_target_to_commit(const std::string &target)
+static string resolve_target_to_commit(const string &target)
 {
     if (target.length() == 64)
     {
@@ -479,7 +479,7 @@ static string get_current_branch_last_commit()
     string current_branch = Commands::get_current_branch_name();
     return get_branch_latest_commit(current_branch);
 }
-static std::string find_root_commit(std::string current_commit_hash)
+static string find_root_commit(string current_commit_hash)
 {
     string prev_hash = current_commit_hash;
     while (!current_commit_hash.empty())
@@ -490,7 +490,7 @@ static std::string find_root_commit(std::string current_commit_hash)
         istringstream stream(commit_data);
         string line;
         bool found_parent = false;
-        while (std::getline(stream, line))
+        while (getline(stream, line))
         {
             if (line.find("parent - ") == 0)
             {
@@ -504,19 +504,19 @@ static std::string find_root_commit(std::string current_commit_hash)
     }
     return prev_hash;
 }
-static std::string get_file_blob_hash_from_commit(const std::string &commit_hash, const std::string &filepath) {
+static string get_file_blob_hash_from_commit(const string &commit_hash, const string &filepath) {
     if (commit_hash.empty()) return "";
 
-    std::string commit_path = ".voxel/objects/" + commit_hash;
-    if (!std::filesystem::exists(commit_path)) return "";
+    string commit_path = ".voxel/objects/" + commit_hash;
+    if (!filesystem::exists(commit_path)) return "";
     
-    std::string commit_data = FileSystem::read_file_to_string(commit_path);
-    std::istringstream commit_stream(commit_data);
-    std::string line;
-    std::string index_copy_hash = "";
+    string commit_data = FileSystem::read_file_to_string(commit_path);
+    istringstream commit_stream(commit_data);
+    string line;
+    string index_copy_hash = "";
 
     // 1. Get the Tree Index hash
-    while (std::getline(commit_stream, line)) {
+    while (getline(commit_stream, line)) {
         if (line.find("tree - ") == 0) {
             index_copy_hash = line.substr(7);
             index_copy_hash.erase(index_copy_hash.find_last_not_of(" \n\r\t") + 1);
@@ -526,20 +526,20 @@ static std::string get_file_blob_hash_from_commit(const std::string &commit_hash
 
     if (index_copy_hash.empty()) return "";
 
-    std::string index_path = ".voxel/objects/" + index_copy_hash;
-    if (!std::filesystem::exists(index_path)) return "";
+    string index_path = ".voxel/objects/" + index_copy_hash;
+    if (!filesystem::exists(index_path)) return "";
     
-    std::string index_data = FileSystem::read_file_to_string(index_path);
-    std::istringstream index_stream(index_data);
+    string index_data = FileSystem::read_file_to_string(index_path);
+    istringstream index_stream(index_data);
     
     // 2. Extract just the filename to match safely regardless of how Voxel stores the path
-    std::string target_filename = std::filesystem::path(filepath).filename().string();
+    string target_filename = filesystem::path(filepath).filename().string();
 
-    while (std::getline(index_stream, line)) {
+    while (getline(index_stream, line)) {
         // Search using the clean filename
-        if (line.find(target_filename) != std::string::npos) {
-            std::istringstream line_stream(line);
-            std::string word;
+        if (line.find(target_filename) != string::npos) {
+            istringstream line_stream(line);
+            string word;
             while (line_stream >> word) {
                 if (word.length() == 64) {
                     return word; // Successfully found the Blob Hash
@@ -549,7 +549,7 @@ static std::string get_file_blob_hash_from_commit(const std::string &commit_hash
     }
     return ""; 
 }
-void diffEngine::report_media_file_diff(const std::string &file,const std::string &old_content,const std::string &new_content,bool old_existed, bool new_existed)
+void diffEngine::report_media_file_diff(const string &file,const string &old_content,const string &new_content,bool old_existed, bool new_existed)
 {
     if (!old_existed && new_existed)
     {
@@ -576,13 +576,13 @@ void diffEngine::report_media_file_diff(const std::string &file,const std::strin
     }
     // If neither side existed there's nothing meaningful to report.
 }
-void diffEngine::route_diff(const std::vector<std::string> &args)
+void diffEngine::route_diff(const vector<string> &args)
 {
     vector<string> all_files = FileSystem::list_workspace_files();
     if (args.size() == 2 && fs::exists(args[0]) && fs::exists(args[1]))
     {
-        std::string old_c = FileSystem::read_file_to_string(args[0]);
-        std::string new_c = FileSystem::read_file_to_string(args[1]);
+        string old_c = FileSystem::read_file_to_string(args[0]);
+        string new_c = FileSystem::read_file_to_string(args[1]);
         diffEngine::run_engine_on_file(args[0] + " -> " + args[1], old_c, new_c);
         return;
     }
@@ -596,7 +596,7 @@ void diffEngine::route_diff(const std::vector<std::string> &args)
     }
     else if (args.size() == 1)
     {
-        std::string target = args[0];
+        string target = args[0];
         if (target == "Head" || target == "HEAD" || target == "head")
         {
             cout << BOLD << CYAN << "Comparing Workspace vs Root Commit (Head)...\n"
@@ -612,10 +612,10 @@ void diffEngine::route_diff(const std::vector<std::string> &args)
     }
     else if (args.size() == 2)
     {
-        std::string target1 = args[0];
-        std::string target2 = args[1];
+        string target1 = args[0];
+        string target2 = args[1];
 
-        std::cout << BOLD << CYAN << "Comparing " << target1 << " vs " << target2 << "...\n"
+        cout << BOLD << CYAN << "Comparing " << target1 << " vs " << target2 << "...\n"
                   << RESET;
 
         left_commit_hash = resolve_target_to_commit(target1);
@@ -623,7 +623,7 @@ void diffEngine::route_diff(const std::vector<std::string> &args)
     }
     else
     {
-        std::cerr << RED << "Error: Invalid number of arguments for voxel diff. Run voxel help for usage information.\n"
+        cerr << RED << "Error: Invalid number of arguments for voxel diff. Run voxel help for usage information.\n"
                   << RESET;
         return;
     }
@@ -653,7 +653,7 @@ void diffEngine::route_diff(const std::vector<std::string> &args)
         }
         else if (!right_commit_hash.empty())
         {
-            std::string file_blob_hash = get_file_blob_hash_from_commit(right_commit_hash, file);
+            string file_blob_hash = get_file_blob_hash_from_commit(right_commit_hash, file);
             if (!file_blob_hash.empty())
             {
                 new_content = fetch_decompress(file_blob_hash);
@@ -670,13 +670,13 @@ void diffEngine::route_diff(const std::vector<std::string> &args)
         diffEngine::run_engine_on_file(file, old_content, new_content);
     }
 }
-void diffEngine::ai_diff(const std::vector<std::string> &args)
+void diffEngine::ai_diff(const vector<string> &args)
 {
     vector<string> all_files = FileSystem::list_workspace_files();
     if (args.size() == 2 && fs::exists(args[0]) && fs::exists(args[1]))
     {
-        std::string old_c = FileSystem::read_file_to_string(args[0]);
-        std::string new_c = FileSystem::read_file_to_string(args[1]);
+        string old_c = FileSystem::read_file_to_string(args[0]);
+        string new_c = FileSystem::read_file_to_string(args[1]);
         diffEngine::run_engine_on_file(args[0] + " -> " + args[1], old_c, new_c);
         return;
     }
@@ -690,7 +690,7 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
     }
     else if (args.size() == 1)
     {
-        std::string target = args[0];
+        string target = args[0];
         if (target == "Head" || target == "HEAD" || target == "head")
         {
             cout << BOLD << CYAN << "Comparing Workspace vs Root Commit (Head)...\n"
@@ -706,10 +706,10 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
     }
     else if (args.size() == 2)
     {
-        std::string target1 = args[0];
-        std::string target2 = args[1];
+        string target1 = args[0];
+        string target2 = args[1];
 
-        std::cout << BOLD << CYAN << "Comparing " << target1 << " vs " << target2 << "...\n"
+        cout << BOLD << CYAN << "Comparing " << target1 << " vs " << target2 << "...\n"
                   << RESET;
 
         left_commit_hash = resolve_target_to_commit(target1);
@@ -717,7 +717,7 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
     }
     else
     {
-        std::cerr << RED << "Error: Invalid number of arguments for voxel diff. Run voxel help for usage information.\n"
+        cerr << RED << "Error: Invalid number of arguments for voxel diff. Run voxel help for usage information.\n"
                   << RESET;
         return;
     }
@@ -747,7 +747,7 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
         }
         else if (!right_commit_hash.empty())
         {
-            std::string file_blob_hash = get_file_blob_hash_from_commit(right_commit_hash, file);
+            string file_blob_hash = get_file_blob_hash_from_commit(right_commit_hash, file);
             if (!file_blob_hash.empty())
             {
                 new_content = fetch_decompress(file_blob_hash);
@@ -764,7 +764,405 @@ void diffEngine::ai_diff(const std::vector<std::string> &args)
         ai::run_ai_diff(file, old_content, new_content);
     }
 }
+namespace PdfGen {
+    enum PdfStyle {
+        STYLE_NORMAL = 0,   
+        STYLE_ADDED = 1,    
+        STYLE_DELETED = 2,  
+        STYLE_TITLE = 3,    
+        STYLE_SCOPE = 4     
+    };
 
+    struct PdfLine {
+        string text;
+        int style;
+    };
+
+    class SimplePdfWriter {
+    public:
+        SimplePdfWriter(int page_width = 612, int page_height = 792) // US Letter, points
+            : pw(page_width), ph(page_height) {}
+
+        void add_line(const string &text, int style = STYLE_NORMAL) {
+            // Hard-wrap long lines so nothing runs off the page edge.
+            const size_t max_chars = 100;
+            if (text.size() <= max_chars) {
+                lines.push_back({text, style});
+                return;
+            }
+            size_t pos = 0;
+            bool first = true;
+            while (pos < text.size()) {
+                string chunk = text.substr(pos, max_chars);
+                if (!first) chunk = "    " + chunk; // indent wrapped continuation
+                lines.push_back({chunk, style});
+                pos += max_chars;
+                first = false;
+            }
+        }
+
+        void add_blank() {
+            lines.push_back({"", STYLE_NORMAL});
+        }
+
+        bool save(const string &path) {
+            const int margin_left = 40;
+            const int margin_top = 40;
+            const int margin_bottom = 40;
+            const int font_size = 9;
+            const int line_height = 12;
+
+            const int usable_height = ph - margin_top - margin_bottom;
+            const int lines_per_page = max(1, usable_height / line_height);
+
+            
+            vector<vector<PdfLine>> pages;
+            for (size_t i = 0; i < lines.size(); i += lines_per_page) {
+                size_t end = min(lines.size(), i + (size_t)lines_per_page);
+                pages.push_back(vector<PdfLine>(lines.begin() + i, lines.begin() + end));
+            }
+            if (pages.empty()) pages.push_back({}); // always emit at least one page
+
+            const int page_count = (int)pages.size();
+
+           
+            const int obj_catalog = 1;
+            const int obj_pages = 2;
+            const int obj_font = 3;
+            const int first_page_obj = 4;
+            const int first_content_obj = first_page_obj + page_count;
+            const int total_objects = first_content_obj + page_count - 1;
+
+            vector<string> objects(total_objects + 1); // 1-indexed
+
+            // Catalog
+            objects[obj_catalog] = "<< /Type /Catalog /Pages " + to_string(obj_pages) + " 0 R >>";
+
+            
+            {
+                string kids = "[ ";
+                for (int p = 0; p < page_count; p++) {
+                    kids += to_string(first_page_obj + p) + " 0 R ";
+                }
+                kids += "]";
+                objects[obj_pages] = "<< /Type /Pages /Kids " + kids +
+                                      " /Count " + to_string(page_count) + " >>";
+            }
+
+            
+            objects[obj_font] = "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>";
+
+          
+            for (int p = 0; p < page_count; p++) {
+                int page_obj_num = first_page_obj + p;
+                int content_obj_num = first_content_obj + p;
+
+                objects[page_obj_num] =
+                    "<< /Type /Page /Parent " + to_string(obj_pages) + " 0 R "
+                    "/MediaBox [0 0 " + to_string(pw) + " " + to_string(ph) + "] "
+                    "/Resources << /Font << /F1 " + to_string(obj_font) + " 0 R >> >> "
+                    "/Contents " + to_string(content_obj_num) + " 0 R >>";
+
+                ostringstream stream;
+                int y = ph - margin_top;
+                for (const auto &pl : pages[p]) {
+                    double r = 0.15, g = 0.15, b = 0.15; // STYLE_NORMAL default
+                    switch (pl.style) {
+                        case STYLE_ADDED:   r = 0.0;  g = 0.5;  b = 0.0;  break;
+                        case STYLE_DELETED: r = 0.75; g = 0.0;  b = 0.0;  break;
+                        case STYLE_TITLE:   r = 0.0;  g = 0.0;  b = 0.0;  break;
+                        case STYLE_SCOPE:   r = 0.0;  g = 0.15; b = 0.55; break;
+                        default: break;
+                    }
+                    stream << r << " " << g << " " << b << " rg\n";
+                    stream << "BT /F1 " << font_size << " Tf "
+                           << margin_left << " " << y << " Td ("
+                           << escape_pdf_text(pl.text) << ") Tj ET\n";
+                    y -= line_height;
+                }
+
+                string content = stream.str();
+                objects[content_obj_num] =
+                    "<< /Length " + to_string(content.size()) + " >>\nstream\n" +
+                    content + "endstream";
+            }
+
+            
+            ofstream out(path, ios::binary);
+            if (!out.is_open()) return false;
+
+            vector<size_t> offsets(total_objects + 1, 0);
+            ostringstream file_buf;
+            file_buf << "%PDF-1.4\n";
+
+            for (int i = 1; i <= total_objects; i++) {
+                offsets[i] = (size_t)file_buf.tellp();
+                file_buf << i << " 0 obj\n" << objects[i] << "\nendobj\n";
+            }
+
+            size_t xref_offset = (size_t)file_buf.tellp();
+            file_buf << "xref\n0 " << (total_objects + 1) << "\n";
+            file_buf << "0000000000 65535 f \n";
+            char buf[32];
+            for (int i = 1; i <= total_objects; i++) {
+                snprintf(buf, sizeof(buf), "%010zu 00000 n \n", offsets[i]);
+                file_buf << buf;
+            }
+            file_buf << "trailer\n<< /Size " << (total_objects + 1)
+                      << " /Root " << obj_catalog << " 0 R >>\n";
+            file_buf << "startxref\n" << xref_offset << "\n%%EOF";
+
+            string final_data = file_buf.str();
+            out.write(final_data.data(), (streamsize)final_data.size());
+            out.close();
+            return true;
+        }
+
+    private:
+        vector<PdfLine> lines;
+        int pw, ph;
+
+        string escape_pdf_text(const string &s) {
+            string out;
+            out.reserve(s.size());
+            for (char c : s) {
+                if (c == '(' || c == ')' || c == '\\') {
+                    out += '\\';
+                    out += c;
+                } else if ((unsigned char)c < 0x20) {
+                    
+                    out += ' ';
+                } else {
+                    out += c;
+                }
+            }
+            return out;
+        }
+    };
+
+} // namespace PdfGen
+static string diff_pdf_display_timestamp() {
+    time_t t = time(nullptr);
+    tm tm_buf = *localtime(&t);
+    ostringstream oss;
+    oss << put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
+    return oss.str();
+}
+static string diff_pdf_filename_timestamp() {
+    time_t t = time(nullptr);
+    tm tm_buf = *localtime(&t);
+    ostringstream oss;
+    oss << put_time(&tm_buf, "%Y%m%d_%H%M%S");
+    return oss.str();
+}
+static void collect_granular_diff_pdf(PdfGen::SimplePdfWriter &pdf,const vector<string> &old_lines,const vector<string> &new_lines,int old_start, int new_start,int &lines_ins, int &chars_ins,int &lines_del, int &chars_del) {
+    size_t i = 0, j = 0;
+    while (i < old_lines.size() || j < new_lines.size()) {
+        if (i < old_lines.size() && j < new_lines.size() && old_lines[i] == new_lines[j]) {
+            i++; j++;
+        } else if (i < old_lines.size() && (j >= new_lines.size() ||
+                   find(new_lines.begin() + j, new_lines.end(), old_lines[i]) == new_lines.end())) {
+            if (old_lines[i].find_first_not_of(" \t\r\n") != string::npos) {
+                ostringstream oss;
+                oss << setw(4) << (old_start + i) << " | - " << old_lines[i];
+                pdf.add_line(oss.str(), PdfGen::STYLE_DELETED);
+                lines_del++;
+                chars_del += (int)old_lines[i].length();
+            }
+            i++;
+        } else {
+            if (new_lines[j].find_first_not_of(" \t\r\n") != string::npos) {
+                ostringstream oss;
+                oss << setw(4) << (new_start + j) << " | + " << new_lines[j];
+                pdf.add_line(oss.str(), PdfGen::STYLE_ADDED);
+                lines_ins++;
+                chars_ins += (int)new_lines[j].length();
+            }
+            j++;
+        }
+    }
+}
+static void collect_diff_results_pdf(PdfGen::SimplePdfWriter &pdf,const vector<DiffResult> &results,const string &fileA, const string &fileB,int &total_ins, int &total_del) {
+    pdf.add_line("FILE DIFF: " + fileA + "  ->  " + fileB, PdfGen::STYLE_TITLE);
+    pdf.add_blank();
+
+    int lines_inserted = 0, chars_inserted = 0;
+    int lines_deleted = 0, chars_deleted = 0;
+    bool has_changes = false;
+
+    for (const auto &res : results) {
+        if (res.type == UNCHANGED) continue;
+        has_changes = true;
+
+        if (res.type == MODIFIED) {
+            pdf.add_line("Scope: " + res.new_block.scope + "  [MODIFIED]", PdfGen::STYLE_SCOPE);
+            collect_granular_diff_pdf(pdf, res.old_block.lines, res.new_block.lines,
+                                       res.old_block.start_line, res.new_block.start_line,
+                                       lines_inserted, chars_inserted, lines_deleted, chars_deleted);
+            pdf.add_blank();
+        } else if (res.type == ADDED) {
+            pdf.add_line("Scope: " + res.new_block.scope + "  [ADDED]", PdfGen::STYLE_SCOPE);
+            int ln = res.new_block.start_line;
+            for (const auto &line : res.new_block.lines) {
+                if (line.find_first_not_of(" \t\r\n") == string::npos) { ln++; continue; }
+                ostringstream oss;
+                oss << setw(4) << ln++ << " | + " << line;
+                pdf.add_line(oss.str(), PdfGen::STYLE_ADDED);
+                lines_inserted++;
+                chars_inserted += (int)line.length();
+            }
+            pdf.add_blank();
+        } else if (res.type == DELETED) {
+            pdf.add_line("Scope: " + res.old_block.scope + "  [DELETED]", PdfGen::STYLE_SCOPE);
+            int ln = res.old_block.start_line;
+            for (const auto &line : res.old_block.lines) {
+                if (line.find_first_not_of(" \t\r\n") == string::npos) { ln++; continue; }
+                ostringstream oss;
+                oss << setw(4) << ln++ << " | - " << line;
+                pdf.add_line(oss.str(), PdfGen::STYLE_DELETED);
+                lines_deleted++;
+                chars_deleted += (int)line.length();
+            }
+            pdf.add_blank();
+        }
+    }
+
+    if (!has_changes) {
+        pdf.add_line("No structural changes detected.", PdfGen::STYLE_NORMAL);
+        pdf.add_blank();
+    }
+
+    pdf.add_line("Summary: +" + to_string(lines_inserted) + " lines inserted (" +
+                 to_string(chars_inserted) + " chars)   -" +
+                 to_string(lines_deleted) + " lines deleted (" +
+                 to_string(chars_deleted) + " chars)", PdfGen::STYLE_TITLE);
+    pdf.add_blank();
+
+    total_ins += lines_inserted;
+    total_del += lines_deleted;
+}
+static void run_engine_on_file_pdf(PdfGen::SimplePdfWriter &pdf, const string &filepath,const string &old_content, const string &new_content,int &total_ins, int &total_del) {
+    vector<Block> old_blocks = diffEngine::parse_memory(old_content);
+    vector<Block> new_blocks = diffEngine::parse_memory(new_content);
+    vector<DiffResult> results = diffEngine::analyze_diff(old_blocks, new_blocks);
+    collect_diff_results_pdf(pdf, results, filepath + " (Old)", filepath + " (New)", total_ins, total_del);
+}
+static void report_media_file_diff_pdf(PdfGen::SimplePdfWriter &pdf, const string &file,const string &old_content, const string &new_content,bool old_existed, bool new_existed) {
+    if (!old_existed && new_existed) {
+        pdf.add_line("[+ ADDED]    " + file + "  (media file, " +
+                     to_string(new_content.size()) + " bytes)", PdfGen::STYLE_ADDED);
+    } else if (old_existed && !new_existed) {
+        pdf.add_line("[- DELETED]  " + file + "  (media file, was " +
+                     to_string(old_content.size()) + " bytes)", PdfGen::STYLE_DELETED);
+    } else if (old_existed && new_existed) {
+        if (old_content.size() != new_content.size()) {
+            pdf.add_line("[~ MODIFIED] " + file + "  (media file, " +
+                         to_string(old_content.size()) + " -> " +
+                         to_string(new_content.size()) + " bytes)", PdfGen::STYLE_SCOPE);
+        } else {
+            pdf.add_line("[= UNCHANGED]" + file + "  (media file, " +
+                         to_string(old_content.size()) + " bytes)", PdfGen::STYLE_NORMAL);
+        }
+    }
+    pdf.add_blank();
+}
+void diffEngine::diff_pdf(const vector<string> &args) {
+    PdfGen::SimplePdfWriter pdf;
+    string display_ts = diff_pdf_display_timestamp();
+
+    pdf.add_line("VOXEL VERSION CONTROL - DIFF REPORT", PdfGen::STYLE_TITLE);
+    pdf.add_line("Generated: " + display_ts, PdfGen::STYLE_NORMAL);
+    pdf.add_blank();
+
+    int total_ins = 0, total_del = 0;
+    vector<string> all_files = FileSystem::list_workspace_files();
+
+    // Case: two literal on-disk file paths, e.g. "voxel diff_pdf a.cpp b.cpp"
+    if (args.size() == 2 && fs::exists(args[0]) && fs::exists(args[1])) {
+        string old_c = FileSystem::read_file_to_string(args[0]);
+        string new_c = FileSystem::read_file_to_string(args[1]);
+        run_engine_on_file_pdf(pdf, args[0] + " -> " + args[1], old_c, new_c, total_ins, total_del);
+
+        string out_path = "diff_pdf_" + diff_pdf_filename_timestamp() + ".pdf";
+        if (pdf.save(out_path)) {
+            cout << BOLD << CYAN << "PDF diff written to: " << RESET << out_path << "\n";
+        } else {
+            cerr << RED << "Error: Failed to write PDF diff to '" << out_path << "'.\n" << RESET;
+        }
+        return;
+    }
+
+    string left_commit_hash = "";
+    string right_commit_hash = "WORKSPACE";
+
+    if (args.empty()) {
+        cout << BOLD << CYAN << "Generating PDF diff: Workspace vs Last Commit (Current Branch)...\n" << RESET;
+        left_commit_hash = get_current_branch_last_commit();
+    } else if (args.size() == 1) {
+        string target = args[0];
+        if (target == "Head" || target == "HEAD" || target == "head") {
+            cout << BOLD << CYAN << "Generating PDF diff: Workspace vs Root Commit (Head)...\n" << RESET;
+            left_commit_hash = find_root_commit(get_current_branch_last_commit());
+        } else {
+            cout << BOLD << CYAN << "Generating PDF diff: Workspace vs Root Commit of branch '" << target << "'...\n" << RESET;
+            left_commit_hash = find_branch_base_commit(resolve_target_to_commit(target));
+        }
+    } else if (args.size() == 2) {
+        string target1 = args[0];
+        string target2 = args[1];
+        cout << BOLD << CYAN << "Generating PDF diff: " << target1 << " vs " << target2 << "...\n" << RESET;
+        left_commit_hash = resolve_target_to_commit(target1);
+        right_commit_hash = resolve_target_to_commit(target2);
+    } else {
+        cerr << RED << "Error: Invalid number of arguments for voxel diff_pdf.\n"
+                  << "Usage: voxel diff_pdf | voxel diff_pdf <branch|hash> | voxel diff_pdf <a> <b>\n" << RESET;
+        return;
+    }
+
+    for (const auto &file : all_files) {
+        string old_content = "";
+        string new_content = "";
+        bool old_existed = false;
+        bool new_existed = false;
+
+        if (!left_commit_hash.empty()) {
+            string file_blob_hash = get_file_blob_hash_from_commit(left_commit_hash, file);
+            if (!file_blob_hash.empty()) {
+                old_content = fetch_decompress(file_blob_hash);
+                old_existed = true;
+            }
+        }
+        if (right_commit_hash == "WORKSPACE") {
+            if (fs::exists(file)) {
+                new_content = FileSystem::read_file_to_string(file);
+                new_existed = true;
+            }
+        } else if (!right_commit_hash.empty()) {
+            string file_blob_hash = get_file_blob_hash_from_commit(right_commit_hash, file);
+            if (!file_blob_hash.empty()) {
+                new_content = fetch_decompress(file_blob_hash);
+                new_existed = true;
+            }
+        }
+
+        if (Commands::should_ignore_extension(fs::path(file).extension().string())) {
+            report_media_file_diff_pdf(pdf, file, old_content, new_content, old_existed, new_existed);
+            continue;
+        }
+
+        run_engine_on_file_pdf(pdf, file, old_content, new_content, total_ins, total_del);
+    }
+
+    pdf.add_line("TOTAL: +" + to_string(total_ins) + " lines inserted, -" +
+                 to_string(total_del) + " lines deleted across all files.", PdfGen::STYLE_TITLE);
+
+    string out_path = "diff_pdf_" + diff_pdf_filename_timestamp() + ".pdf";
+    if (pdf.save(out_path)) {
+        cout << BOLD << CYAN << "PDF diff written to: " << RESET << out_path << "\n";
+    } else {
+        cerr << RED << "Error: Failed to write PDF diff to '" << out_path << "'.\n" << RESET;
+    }
+}
 //merge engine
 struct MergeOpcode {
     enum Tag { EQUAL, CHANGE } tag;
@@ -772,15 +1170,15 @@ struct MergeOpcode {
     size_t b1, b2; 
 };
 static const string SANDBOX_DIR = "sandbox_merge";
-static std::vector<MergeOpcode> merge_diff_opcodes(const std::vector<std::string> &base,const std::vector<std::string> &other) {
+static vector<MergeOpcode> merge_diff_opcodes(const vector<string> &base,const vector<string> &other) {
     size_t n = base.size(), m = other.size();
-    std::vector<std::vector<int>> dp(n + 1, std::vector<int>(m + 1, 0));
+    vector<vector<int>> dp(n + 1, vector<int>(m + 1, 0));
     for (size_t i = n; i-- > 0;)
         for (size_t j = m; j-- > 0;)
             dp[i][j] = (base[i] == other[j]) ? dp[i + 1][j + 1] + 1
-                                              : std::max(dp[i + 1][j], dp[i][j + 1]);
+                                              : max(dp[i + 1][j], dp[i][j + 1]);
 
-    std::vector<MergeOpcode> ops;
+    vector<MergeOpcode> ops;
     size_t i = 0, j = 0, ca = 0, cb = 0;
     auto flush = [&](size_t a1, size_t a2, size_t b1, size_t b2) {
         if (a1 != a2 || b1 != b2) ops.push_back({MergeOpcode::CHANGE, a1, a2, b1, b2});
@@ -801,15 +1199,15 @@ static std::vector<MergeOpcode> merge_diff_opcodes(const std::vector<std::string
     flush(ca, n, cb, m);
     return ops;
 }
-static MergeOpcode::Tag merge_find_status(const std::vector<MergeOpcode> &ops, size_t p) {
+static MergeOpcode::Tag merge_find_status(const vector<MergeOpcode> &ops, size_t p) {
     for (const auto &op : ops) {
         if (op.a1 == op.a2) { if (op.a1 == p) return MergeOpcode::CHANGE; }
         else if (op.a1 <= p && p < op.a2) return op.tag;
     }
     return MergeOpcode::EQUAL;
 }
-static std::vector<std::string> merge_extract_side_text(const std::vector<std::string> &base,const std::vector<std::string> &side,const std::vector<MergeOpcode> &ops,size_t rs, size_t re) {
-    std::vector<std::string> out;
+static vector<string> merge_extract_side_text(const vector<string> &base,const vector<string> &side,const vector<MergeOpcode> &ops,size_t rs, size_t re) {
+    vector<string> out;
     for (const auto &op : ops) {
         if (op.a1 == op.a2) {
             bool included = (rs < re) ? (op.a1 >= rs && op.a1 < re) : (op.a1 == rs);
@@ -818,7 +1216,7 @@ static std::vector<std::string> merge_extract_side_text(const std::vector<std::s
         }
         if (op.a2 <= rs || op.a1 >= re) continue;
         if (op.tag == MergeOpcode::EQUAL) {
-            size_t s = std::max(op.a1, rs), e = std::min(op.a2, re);
+            size_t s = max(op.a1, rs), e = min(op.a2, re);
             for (size_t k = s; k < e; k++) out.push_back(base[k]);
         } else {
             for (size_t k = op.b1; k < op.b2; k++) out.push_back(side[k]);
@@ -828,12 +1226,12 @@ static std::vector<std::string> merge_extract_side_text(const std::vector<std::s
 }
 struct MergePiece {
     enum Kind { COMMON, OURS_ONLY, THEIRS_ONLY, CONFLICT } kind;
-    std::vector<std::string> ours_lines;
-    std::vector<std::string> theirs_lines;
+    vector<string> ours_lines;
+    vector<string> theirs_lines;
 };
-static void merge_classify_and_push(std::vector<MergePiece> &pieces,const std::vector<std::string> &base,const std::vector<std::string> &ours,const std::vector<std::string> &theirs,const std::vector<MergeOpcode> &ops_o,const std::vector<MergeOpcode> &ops_t,size_t seg_start, size_t seg_end,bool o_changed, bool t_changed, bool &has_conflict) {
-    std::vector<std::string> ours_text = merge_extract_side_text(base, ours, ops_o, seg_start, seg_end);
-    std::vector<std::string> theirs_text = merge_extract_side_text(base, theirs, ops_t, seg_start, seg_end);
+static void merge_classify_and_push(vector<MergePiece> &pieces,const vector<string> &base,const vector<string> &ours,const vector<string> &theirs,const vector<MergeOpcode> &ops_o,const vector<MergeOpcode> &ops_t,size_t seg_start, size_t seg_end,bool o_changed, bool t_changed, bool &has_conflict) {
+    vector<string> ours_text = merge_extract_side_text(base, ours, ops_o, seg_start, seg_end);
+    vector<string> theirs_text = merge_extract_side_text(base, theirs, ops_t, seg_start, seg_end);
     MergePiece piece;
     if ((!o_changed && !t_changed) || ours_text == theirs_text) {
         piece.kind = MergePiece::COMMON;
@@ -852,18 +1250,18 @@ static void merge_classify_and_push(std::vector<MergePiece> &pieces,const std::v
     }
     pieces.push_back(piece);
 }
-static std::vector<MergePiece> build_three_way_pieces(const std::vector<std::string> &base,const std::vector<std::string> &ours,const std::vector<std::string> &theirs,bool &has_conflict) {
-    std::vector<MergeOpcode> ops_o = merge_diff_opcodes(base, ours);
-    std::vector<MergeOpcode> ops_t = merge_diff_opcodes(base, theirs);
+static vector<MergePiece> build_three_way_pieces(const vector<string> &base,const vector<string> &ours,const vector<string> &theirs,bool &has_conflict) {
+    vector<MergeOpcode> ops_o = merge_diff_opcodes(base, ours);
+    vector<MergeOpcode> ops_t = merge_diff_opcodes(base, theirs);
     has_conflict = false;
     size_t n = base.size();
 
-    std::set<size_t> cut_set{0, n};
+    set<size_t> cut_set{0, n};
     for (const auto &op : ops_o) { cut_set.insert(op.a1); cut_set.insert(op.a2); }
     for (const auto &op : ops_t) { cut_set.insert(op.a1); cut_set.insert(op.a2); }
-    std::vector<size_t> cuts(cut_set.begin(), cut_set.end());
+    vector<size_t> cuts(cut_set.begin(), cut_set.end());
 
-    std::vector<MergePiece> pieces;
+    vector<MergePiece> pieces;
     size_t idx = 0;
     while (idx + 1 < cuts.size()) {
         size_t seg_start = cuts[idx];
@@ -902,17 +1300,17 @@ static std::vector<MergePiece> build_three_way_pieces(const std::vector<std::str
 
     return pieces;
 }
-string merge::format_branch_name(const std::string &raw_name){
+string merge::format_branch_name(const string &raw_name){
     string formatted = raw_name;
     return formatted;
 }
-void merge::execute(const std::string &current_branch, const std::string &incoming_branch){
+void merge::execute(const string &current_branch, const string &incoming_branch){
     string target_branch = format_branch_name(current_branch);
     string source_branch = format_branch_name(incoming_branch);
     cout << "\033[1;36mVoxel Merge: Merging '" << source_branch << "' into '" << target_branch << "'...\033[0m\n";
     string base_commit = merge::find_lowest_common_ancestor(source_branch, target_branch);
     if (base_commit.empty()) {
-        std::cerr << "\033[1;31mError: No common ancestor found. Cannot proceed with merge. Try making a commit on both branches.\033[0m\n";
+        cerr << "\033[1;31mError: No common ancestor found. Cannot proceed with merge. Try making a commit on both branches.\033[0m\n";
         return;
     }
     if (!setup_sandbox()) return;
@@ -930,7 +1328,7 @@ void merge::execute(const std::string &current_branch, const std::string &incomi
         }
     }
     if (has_conflicts) {
-        std::cout << "\n\033[1;33mConflicts were resolved in the sandbox.\033[0m\n";
+        cout << "\n\033[1;33mConflicts were resolved in the sandbox.\033[0m\n";
     }
     cout << "\n\033[1;32mSandbox merge complete.\033[0m\n";
     cout << "Type 'yes' to finalize this merge and apply changes to your active workspace: ";
@@ -946,16 +1344,16 @@ void merge::execute(const std::string &current_branch, const std::string &incomi
     }
     merge::cleanup_sandbox();
 }
-static std::vector<std::string> split_lines(const std::string& text) {
-    std::vector<std::string> lines;
-    std::stringstream ss(text);
-    std::string line;
-    while (std::getline(ss, line)) {
+static vector<string> split_lines(const string& text) {
+    vector<string> lines;
+    stringstream ss(text);
+    string line;
+    while (getline(ss, line)) {
         lines.push_back(line);
     }
     return lines;
 }
-bool merge::process_file_merge(const std::string &filepath, const std::string &target_branch, const std::string &source_branch, const std::string &base_commit) {
+bool merge::process_file_merge(const string &filepath, const string &target_branch, const string &source_branch, const string &base_commit) {
     string base_content = merge::get_file_content_from_commit(base_commit, filepath);
     string ours_content = FileSystem::read_file_to_string(filepath);
     string theirs_content = merge::get_file_content_from_commit(merge::get_branch_commit(source_branch), filepath);
@@ -980,7 +1378,7 @@ bool merge::process_file_merge(const std::string &filepath, const std::string &t
 #endif
         fs::path dest = fs::path(SANDBOX_DIR) / filepath;
         fs::create_directories(dest.parent_path());
-        std::ofstream out(dest);
+        ofstream out(dest);
         out << theirs_content;
         return false;
     }
@@ -993,9 +1391,9 @@ bool merge::process_file_merge(const std::string &filepath, const std::string &t
 #ifdef VOXEL_MERGE_DEBUG
     cout << "  -> path: running dtl::Diff3 (both sides changed)\n";
 #endif
-    std::vector<std::string> base_lines = split_lines(base_content);
-    std::vector<std::string> ours_lines = split_lines(ours_content);
-    std::vector<std::string> theirs_lines = split_lines(theirs_content);
+    vector<string> base_lines = split_lines(base_content);
+    vector<string> ours_lines = split_lines(ours_content);
+    vector<string> theirs_lines = split_lines(theirs_content);
  
     // Run the Diff3 engine.
     // IMPORTANT: dtl::Diff3's signature is Diff3(A, B, C) where B (the MIDDLE
@@ -1003,14 +1401,14 @@ bool merge::process_file_merge(const std::string &filepath, const std::string &t
     // internally (diff_ba = diff(B,A), diff_bc = diff(B,C)). base_lines must
     // go in the middle slot, not the first one, or the merge logic computes
     // everything relative to the wrong reference point.
-    dtl::Diff3<std::string> diff3(ours_lines, base_lines, theirs_lines);
+    dtl::Diff3<string> diff3(ours_lines, base_lines, theirs_lines);
     diff3.compose();
  
     if (diff3.merge()) {
         // DTL successfully merged line-by-line without overlapping conflicts!
         fs::path dest = fs::path(SANDBOX_DIR) / filepath;
         fs::create_directories(dest.parent_path());
-        std::ofstream out(dest);
+        ofstream out(dest);
         
         // Write the auto-merged lines to the sandbox
         for (const auto& line : diff3.getMergedSequence()) {
@@ -1022,9 +1420,9 @@ bool merge::process_file_merge(const std::string &filepath, const std::string &t
     return true;
  
 }
-void merge::resolve_conflict_interactive(const std::string &filepath,const std::vector<std::string> &base_lines,const std::vector<std::string> &ours_lines,const std::vector<std::string> &theirs_lines,const std::string &target_branch,const std::string &source_branch) {
+void merge::resolve_conflict_interactive(const string &filepath,const vector<string> &base_lines,const vector<string> &ours_lines,const vector<string> &theirs_lines,const string &target_branch,const string &source_branch) {
     bool has_conflict = false;
-    std::vector<MergePiece> pieces = build_three_way_pieces(base_lines, ours_lines, theirs_lines, has_conflict);
+    vector<MergePiece> pieces = build_three_way_pieces(base_lines, ours_lines, theirs_lines, has_conflict);
 
     fs::path dest = fs::path(SANDBOX_DIR) / filepath;
     fs::create_directories(dest.parent_path());
@@ -1035,7 +1433,7 @@ void merge::resolve_conflict_interactive(const std::string &filepath,const std::
     // hunks (unchanged and one-sided-change lines are auto-applied) so the
     // person can review it in their editor before choosing a resolution.
     {
-        std::ofstream out(dest, std::ios::trunc);
+        ofstream out(dest, ios::trunc);
         for (const auto &piece : pieces) {
             switch (piece.kind) {
                 case MergePiece::COMMON:
@@ -1069,7 +1467,7 @@ void merge::resolve_conflict_interactive(const std::string &filepath,const std::
     // Phase 2: rewrite with just the CONFLICT pieces resolved per the choice.
     // COMMON / OURS_ONLY / THEIRS_ONLY pieces are already correctly merged
     // and are left untouched by the choice.
-    std::ofstream resolved_out(dest, std::ios::trunc);
+    ofstream resolved_out(dest, ios::trunc);
     for (const auto &piece : pieces) {
         switch (piece.kind) {
             case MergePiece::COMMON:
@@ -1104,8 +1502,8 @@ bool merge::setup_sandbox() {
         }
         fs::create_directories(SANDBOX_DIR);
         return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to create sandbox: " << e.what() << "\n";
+    } catch (const exception& e) {
+        cerr << "Failed to create sandbox: " << e.what() << "\n";
         return false;
     }
 }
@@ -1117,39 +1515,39 @@ void merge::cleanup_sandbox() {
 void merge::apply_sandbox_to_workspace() {
     for (const auto& entry : fs::recursive_directory_iterator(SANDBOX_DIR)) {
         if (entry.is_regular_file()) {
-            std::string sandbox_path = entry.path().string();
-            std::string real_path = sandbox_path.substr(SANDBOX_DIR.length() + 1); 
+            string sandbox_path = entry.path().string();
+            string real_path = sandbox_path.substr(SANDBOX_DIR.length() + 1); 
             fs::copy_file(sandbox_path, real_path, fs::copy_options::overwrite_existing);
         }
     }
 }
-std::string merge::get_branch_commit(const std::string& branch_name) {
-    std::string ref_path = ".voxel/refs/heads/" + branch_name;
+string merge::get_branch_commit(const string& branch_name) {
+    string ref_path = ".voxel/refs/heads/" + branch_name;
     if (fs::exists(ref_path)) {
         return FileSystem::read_file_to_string(ref_path);
     }
     return "";
 }
-string merge::get_file_content_from_commit(const std::string& commit_hash, const std::string& filepath) {
+string merge::get_file_content_from_commit(const string& commit_hash, const string& filepath) {
     if (commit_hash.empty()) return "";
 
-    std::string blob_hash = get_file_blob_hash_from_commit(commit_hash, filepath);
+    string blob_hash = get_file_blob_hash_from_commit(commit_hash, filepath);
     if (blob_hash.empty()) return "";
 
     return fetch_decompress(blob_hash);
 }
-std::string merge::find_lowest_common_ancestor(const std::string& branchA, const std::string& branchB) {
-    std::string commitA = get_branch_commit(branchA);
-    std::string commitB = get_branch_commit(branchB);
+string merge::find_lowest_common_ancestor(const string& branchA, const string& branchB) {
+    string commitA = get_branch_commit(branchA);
+    string commitB = get_branch_commit(branchB);
  
     if (commitA.empty() || commitB.empty()) return "";
     if (commitA == commitB) return commitA; // They are on the exact same commit
  
     // Fetch the repository graph map
-    std::map<std::string, Commands::CommitNode> graph = Commands::build_complete_repo_graph().second;
+    map<string, Commands::CommitNode> graph = Commands::build_complete_repo_graph().second;
  
-    std::set<std::string> history_of_A;
-    std::string currentA = commitA;
+    set<string> history_of_A;
+    string currentA = commitA;
  
     // 1. Walk backward from Branch A to the beginning
     while (!currentA.empty() && currentA != "NONE") {
@@ -1160,7 +1558,7 @@ std::string merge::find_lowest_common_ancestor(const std::string& branchA, const
             break;
         }
     }
-    std::string currentB = commitB;
+    string currentB = commitB;
     while (!currentB.empty() && currentB != "NONE") {
         if (history_of_A.count(currentB) > 0) {
             return currentB; // Found the LCA!

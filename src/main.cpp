@@ -419,7 +419,13 @@ int main(int argc, char *argv[]){
     else if (command == "change_model") {
         Commands::configure_model();
     }
-    
+    else if (command == "diff_pdf") {
+        vector<string> pdf_args;
+        for (int i = 2; i < argc; i++) {
+            pdf_args.push_back(argv[i]);
+        }
+        diffEngine::diff_pdf(pdf_args);
+    }
     
     
     else
@@ -435,9 +441,8 @@ int main(int argc, char *argv[]){
 
 
 
-//imp cloud sharing on same wifi collab
 //more good voxelignore
 
-//may diff user experience
+
 //lens features
 //file that have all list of dependencies and workspace environment

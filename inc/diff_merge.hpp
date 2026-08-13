@@ -43,7 +43,7 @@ public:
     static void route_diff(const std::vector<std::string>& args);
     static void ai_diff(const std::vector<std::string> &args);
     static void report_media_file_diff(const std::string &file,const std::string &old_content,const std::string &new_content, bool old_existed, bool new_existed);
-
+    static void diff_pdf(const std::vector<std::string> &args);
 };
 
 class merge{
