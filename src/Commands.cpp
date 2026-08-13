@@ -1399,4 +1399,125 @@ void Commands::who(){
     cout << "\033[1;37mHardware ID:\033[0m " << hardware_id << "\n";
     cout << "\033[1;36m================================================\033[0m\n";
 }
+static std::string remove_whitespace(const std::string& str) {
+    std::string result = str;
+    result.erase(std::remove_if(result.begin(), result.end(), [](unsigned char c) {
+        return std::isspace(c);
+    }), result.end());
+    return result;
+}
+void Commands::configure_model() {
+    if (!fs::exists(".voxel")) {
+        std::cerr << "\033[1;31mError: Not a Voxel repository. Run 'voxel init' first.\033[0m\n";
+        return;
+    }
 
+    std::cout << "\033[1;36m=== Voxel AI Engine Configuration ===\033[0m\n\n";
+
+    // Step 1: Provider Selection
+    std::cout << "\033[1;33mSelect AI Provider:\033[0m\n";
+    std::cout << "  \033[1;32m1.\033[0m Gemini\n";
+    std::cout << "  \033[1;32m2.\033[0m Claude\n";
+    std::cout << "  \033[1;32m3.\033[0m OpenAI\n";
+    std::cout << "  \033[1;32m4.\033[0m Ollama\n";
+    std::cout << "  \033[1;32m5.\033[0m Groq\n";
+    std::cout << "  \033[1;32m6.\033[0m DeepSeek\n";
+    std::cout << "\033[1;36mEnter choice (1-6): \033[0m";
+
+    int choice = 0;
+    std::cin >> choice;
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Clear buffer
+
+    std::string provider = "none";
+    switch (choice) {
+        case 1: provider = "gemini"; break;
+        case 2: provider = "claude"; break;
+        case 3: provider = "openai"; break;
+        case 4: provider = "ollama"; break;
+        case 5: provider = "groq"; break;
+        case 6: provider = "deepseek"; break;
+        default:
+            std::cerr << "\033[1;31mError: Invalid choice. Aborting configuration.\033[0m\n";
+            return;
+    }
+
+    std::cout << "\033[1;32mSelected Provider: " << provider << "\033[0m\n\n";
+
+    // Step 2: Model Name Input
+    std::string model_name;
+    std::cout << "\033[1;36mEnter Model Name (e.g., gemini-2.5-flash, claude-3-5-sonnet, gpt-4o, deepseek-coder): \033[0m";
+    std::getline(std::cin, model_name);
+    model_name = remove_whitespace(model_name);
+
+    if (model_name.empty()) {
+        std::cerr << "\033[1;31mError: Model name cannot be empty.\033[0m\n";
+        return;
+    }
+
+    // Step 3: API Key Input
+    std::string api_key;
+    if (provider == "ollama") {
+        std::cout << "\033[1;33mNote: Local Ollama selected. Defaulting API key to 'local'.\033[0m\n";
+        api_key = "local";
+    } else {
+        std::cout << "\033[1;36mEnter API Key for " << provider << ": \033[0m";
+        std::getline(std::cin, api_key);
+        api_key = remove_whitespace(api_key);
+
+        if (api_key.empty()) {
+            std::cerr << "\033[1;31mError: API key cannot be empty.\033[0m\n";
+            return;
+        }
+    }
+
+    // Step 4: Parse & Update `.voxel/config`
+    std::string config_path = ".voxel/config";
+    std::map<std::string, std::string> config_map;
+
+    // Load existing config key-value pairs if file exists
+    if (fs::exists(config_path)) {
+        std::ifstream in(config_path);
+        std::string line;
+        while (std::getline(in, line)) {
+            size_t eq_pos = line.find('=');
+            if (eq_pos != std::string::npos) {
+                std::string k = line.substr(0, eq_pos);
+                std::string v = line.substr(eq_pos + 1);
+                config_map[k] = v;
+            }
+        }
+        in.close();
+    }
+
+    // Preserve default identity fields if missing
+    if (config_map.find("username") == config_map.end()) config_map["username"] = "voxel_user";
+    if (config_map.find("email") == config_map.end()) config_map["email"] = "unknown@voxel.internal";
+
+    // Update target parameters
+    config_map["provider"] = provider;
+    config_map["model"] = model_name;
+    config_map["api_key"] = api_key;
+    config_map["is_connected"] = "true";
+
+    // Write updated configuration back to `.voxel/config`
+    std::ofstream out(config_path, std::ios::trunc);
+    if (!out) {
+        std::cerr << "\033[1;31mError: Could not open .voxel/config for writing.\033[0m\n";
+        return;
+    }
+
+    out << "username=" << config_map["username"] << "\n";
+    out << "email=" << config_map["email"] << "\n";
+    out << "provider=" << config_map["provider"] << "\n";
+    out << "model=" << config_map["model"] << "\n";
+    out << "api_key=" << config_map["api_key"] << "\n";
+    out << "is_connected=" << config_map["is_connected"] << "\n";
+    out.close();
+
+    // Step 5: Confirmation Banner
+    std::cout << "\n\033[1;32m[Voxel AI] Configuration Updated Successfully!\033[0m\n";
+    std::cout << "  \033[1;37mProvider     :\033[0m " << provider << "\n";
+    std::cout << "  \033[1;37mModel        :\033[0m " << model_name << "\n";
+    std::cout << "  \033[1;37mAPI Key      :\033[0m " << (api_key.length() > 8 ? (api_key.substr(0, 4) + "..." + api_key.substr(api_key.length() - 4)) : "********") << "\n";
+    std::cout << "  \033[1;37mStatus       :\033[0m Connected\n\n";
+}

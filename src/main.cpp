@@ -416,7 +416,9 @@ int main(int argc, char *argv[]){
         }
         Cloud::mesh_off(args);
     }
-    
+    else if (command == "change_model") {
+        Commands::configure_model();
+    }
     
     
     

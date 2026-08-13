@@ -40,6 +40,7 @@ public:
     static void revive_target(const std::vector<std::string>& args);
     static void setup_global_identity();
     static void who();
+    static void configure_model();
 private:
     static string get_hardware_uuid();
     static void checkout_files_from_tree(const std::string& tree_hash);
