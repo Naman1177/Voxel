@@ -436,13 +436,3 @@ int main(int argc, char *argv[]){
 
     return 0;
 }
-
-    
-
-
-
-//more good voxelignore
-
-
-//lens features
-//file that have all list of dependencies and workspace environment

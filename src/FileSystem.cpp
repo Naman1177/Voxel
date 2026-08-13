@@ -5,101 +5,195 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
+#include <regex>
+
 
 namespace fs = std::filesystem;
 using namespace std;
-std::unordered_set<std::string> load_voxelignore()
-{
-    std::unordered_set<std::string> ignore_set;
-    std::string ignore_file_path = ".voxelignore";
+struct IgnoreRule {
+    std::regex pattern;
+    bool is_negated;
+    bool directory_only;
+    long long expires_at;
+};
+class VoxelIgnore {
+private:
+    std::vector<IgnoreRule> rules;
 
-    if (!fs::exists(ignore_file_path))
-    {
-        return ignore_set; // Return empty set if file doesn't exist yet
-    }
-
-    std::ifstream file(ignore_file_path);
-    std::string line;
-
-    while (std::getline(file, line))
-    {
-        // 1. Trim leading/trailing whitespace
-        line.erase(0, line.find_first_not_of(" \t\r\n"));
-        line.erase(line.find_last_not_of(" \t\r\n") + 1);
-
-        // 2. Ignore empty lines and comments
-        if (line.empty() || line[0] == '#')
-        {
-            continue;
+    std::string glob_to_regex(std::string glob) {
+        std::string regex_str = "";
+        
+        // Handle Leading Slash (Root Anchor)
+        if (!glob.empty() && glob[0] == '/') {
+            glob = glob.substr(1);
+            regex_str += "^"; 
+        } else {
+            regex_str += "(?:^|/)"; // Can match anywhere in the path
         }
 
-        // 3. Normalize: strip trailing slashes for directory matching consistency (e.g., "node_modules/" -> "node_modules")
-        if (line.back() == '/' || line.back() == '\\')
-        {
-            line.pop_back();
+        for (size_t i = 0; i < glob.length(); ++i) {
+            char c = glob[i];
+            if (c == '*' && i + 1 < glob.length() && glob[i+1] == '*') {
+                regex_str += ".*"; 
+                i++;
+            } else if (c == '*') {
+                regex_str += "[^/]*"; 
+            } else if (c == '?') {
+                regex_str += "[^/]";
+            } else if (c == '.') {
+                regex_str += "\\."; 
+            } else {
+                regex_str += c;
+            }
         }
-
-        ignore_set.insert(line);
+        regex_str += "$";
+        return regex_str;
     }
-    return ignore_set;
-}
-std::vector<std::string> FileSystem::list_workspace_files()
-{
-    std::vector<std::string> file_list;
-    fs::path current_dir = ".";
-    std::unordered_set<std::string> user_ignores = load_voxelignore();
 
-    try
-    {
-        for (auto it = fs::recursive_directory_iterator(current_dir); it != fs::recursive_directory_iterator(); ++it)
-        {
-            fs::path relative_path = it->path().lexically_relative(current_dir);
-            std::string path_str = relative_path.string();
-            std::string item_name = it->path().filename().string();
-            std::string file_ext = it->path().extension().string();
-            
-            if (it->is_directory())
-            {
-                std::string dir_name = it->path().filename().string();
-                if (dir_name == ".voxel" || dir_name == ".git" || dir_name == "sandbox_merge")
-                {
-                    it.disable_recursion_pending(); // Tells the OS: Do not open or look inside this folder!
-                    continue;
-                }
-                if (user_ignores.count(item_name) || user_ignores.count(path_str))
-                {
-                    it.disable_recursion_pending(); // Block kernel from entering!
-                    continue;
+public:
+    VoxelIgnore() {
+        if (!fs::exists(".voxelignore")) return;
+
+        std::ifstream file(".voxelignore");
+        std::string line;
+        
+        
+        auto now = std::chrono::system_clock::now();
+        long long current_time = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+
+        while (std::getline(file, line)) {
+           
+            line.erase(0, line.find_first_not_of(" \t\r\n"));
+            line.erase(line.find_last_not_of(" \t\r\n") + 1);
+
+            if (line.empty() || line[0] == '#') continue;
+
+            IgnoreRule rule;
+            rule.is_negated = false;
+            rule.directory_only = false;
+            rule.expires_at = 0;
+
+           
+            std::string ttl_prefix = "[expires:";
+            if (line.find(ttl_prefix) == 0) {
+                size_t end_bracket = line.find(']');
+                if (end_bracket != std::string::npos) {
+                    std::string ts_str = line.substr(ttl_prefix.length(), end_bracket - ttl_prefix.length());
+                    try {
+                        rule.expires_at = std::stoll(ts_str);
+                    } catch (...) {}
+                    
+                   
+                    line = line.substr(end_bracket + 1);
+                    line.erase(0, line.find_first_not_of(" \t"));
                 }
             }
 
-            
-            if (it->is_regular_file())
-            {
+            if (rule.expires_at > 0 && current_time > rule.expires_at) {
+                continue; 
+            }
 
+           
+            if (line[0] == '!') {
+                rule.is_negated = true;
+                line = line.substr(1);
+            }
+
+            
+            if (line.back() == '/') {
+                rule.directory_only = true;
+                line.pop_back();
+            }
+
+            
+            try {
+                rule.pattern = std::regex(glob_to_regex(line));
+                rules.push_back(rule);
+            } catch (const std::regex_error& e) {
+                std::cerr << "\033[1;33m[VoxelIgnore] Syntax Error in pattern: " << line << "\033[0m\n";
+            }
+        }
+    }
+
+    bool is_ignored(const std::string& path_str, bool is_directory) {
+        bool ignored = false;
+        
+        
+        std::string normalized_path = path_str;
+        if (normalized_path.length() >= 2 && normalized_path.substr(0, 2) == "./") {
+            normalized_path = normalized_path.substr(2);
+        }
+
+        
+        for (const auto& rule : rules) {
+            if (rule.directory_only && !is_directory) continue;
+
+            if (std::regex_search(normalized_path, rule.pattern)) {
+                ignored = !rule.is_negated; 
+            }
+        }
+        return ignored;
+    }
+};
+std::vector<std::string> FileSystem::list_workspace_files() {
+    std::vector<std::string> files;
+    std::string current_dir = ".";
+    
+    
+    VoxelIgnore ignore_engine;
+
+    try {
+        for (auto it = fs::recursive_directory_iterator(current_dir); it != fs::recursive_directory_iterator(); ++it) {
+            std::string path_str = it->path().string();
+            std::string filename = it->path().filename().string();
+            bool is_dir = it->is_directory();
+
+           
+            if (is_dir) {
                 
-                if (path_str == "voxel" || path_str == "./voxel" || path_str == ".voxelignore" ||
-                    path_str.find(".DS_Store") != std::string::npos || path_str == ".env" || path_str.find(".vxlpack") != std::string::npos)
+                if (filename == ".voxel" || 
+                    filename == ".git" || 
+                    filename == "sandbox_merge") 
+                {
+                    it.disable_recursion_pending(); 
+                    continue;
+                }
+            } else {
+                
+                if (filename == ".env" || 
+                    filename == ".DS_Store" || 
+                    filename == ".voxelignore" || 
+                    path_str == "voxel" || 
+                    path_str == "./voxel" || 
+                    filename.find(".vxlpack") != std::string::npos) 
                 {
                     continue;
                 }
-                if (user_ignores.count(item_name) ||
-                    user_ignores.count(file_ext) ||
-                    user_ignores.count(path_str))
-                {
-                    continue;
-                }
+            }
 
-                file_list.push_back(path_str);
+       
+            if (ignore_engine.is_ignored(path_str, is_dir)) {
+                if (is_dir) {
+                   
+                    it.disable_recursion_pending(); 
+                }
+                continue;
+            }
+
+            
+            if (it->is_regular_file()) {
+                
+                if (path_str.length() >= 2 && path_str.substr(0, 2) == "./") {
+                    path_str = path_str.substr(2);
+                }
+                files.push_back(path_str);
             }
         }
+    } catch (const fs::filesystem_error& e) {
+        std::cerr << "\033[1;31m[FileSystem] Error scanning workspace: " << e.what() << "\033[0m\n";
     }
-    catch (const fs::filesystem_error &e)
-    {
-        std::cerr << "Directory Scan Error: " << e.what() << "\n";
-    }
-
-    return file_list;
+    
+    return files;
 }
 std::string FileSystem::read_file_to_string(const std::string &path)
 {
@@ -118,14 +212,14 @@ std::unordered_map<std::string, std::string> FileSystem::read_index()
     std::unordered_map<std::string, std::string> index_map;
     std::ifstream index_file(".voxel/index");
 
-    // If no index file exists yet, simply return an empty map
+   
     if (!index_file.is_open())
     {
         return index_map;
     }
 
     std::string filename, file_hash;
-    // Loop through the file line by line extracting the text blocks
+
     while (index_file >> filename >> file_hash)
     {
         index_map[filename] = file_hash;
