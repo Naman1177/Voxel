@@ -178,7 +178,12 @@ void Cloud::unpack_repository(const string &filename)
     }
     in.close();
     cout << "\033[1;32mVault extraction complete (" << file_count << " core files restored).\033[0m\n";
+    if (!fs::exists(".voxel/snapshot")) {
+        fs::create_directories(".voxel/snapshot");
+    }
     Commands::restore_workspace_state("");
+    
+    
     fs::remove(input_filename);
     Commands::setup_global_identity();
     cout << "\033[1;33mRun 'voxel login' to stamp your identity on this cloned workspace.\033[0m\n";

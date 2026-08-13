@@ -57,7 +57,7 @@ std::vector<std::string> FileSystem::list_workspace_files()
             std::string path_str = relative_path.string();
             std::string item_name = it->path().filename().string();
             std::string file_ext = it->path().extension().string();
-            // 1. OPTIMIZATION: Slap a brick wall in front of database subdirectories
+            
             if (it->is_directory())
             {
                 std::string dir_name = it->path().filename().string();
@@ -73,13 +73,13 @@ std::vector<std::string> FileSystem::list_workspace_files()
                 }
             }
 
-            // 2. Process physical target files cleanly
+            
             if (it->is_regular_file())
             {
 
-                // 🔒 SAFE PROTECTION: Exact match for the binary, substring match for garbage artifacts
+                
                 if (path_str == "voxel" || path_str == "./voxel" || path_str == ".voxelignore" ||
-                    path_str.find(".DS_Store") != std::string::npos || path_str == ".env")
+                    path_str.find(".DS_Store") != std::string::npos || path_str == ".env" || path_str.find(".vxlpack") != std::string::npos)
                 {
                     continue;
                 }
