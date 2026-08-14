@@ -353,10 +353,17 @@ void Cloud::host_mesh(const vector<string> &args){
     connections_ledger["host_hardware_id"] = get_node_hardware_id();
     connections_ledger["connections"] = json::array();
     g_mesh_active = true;
+    bool payload_deleted = false;
     while (g_mesh_active)
     {
         auto now = chrono::steady_clock::now();
         bool token_valid = (chrono::duration_cast<chrono::minutes>(now - start_time).count() < 5);
+        if (!token_valid && !payload_deleted && fs::exists(final_pack_file))
+        {
+            fs::remove(final_pack_file);
+            payload_deleted = true;
+            cout << "\033[1;33m[Mesh] Token expired. Payload purged from host to save space.\033[0m\n";
+        }
         pollfd fds[2];
         fds[0].fd = udp_fd;
         fds[0].events = POLLIN;
@@ -435,6 +442,15 @@ void Cloud::host_mesh(const vector<string> &args){
                         cout << "\033[1;32m[Mesh Registered] Node: "
                              << client_info["hardware_id"].get<string>().substr(0, 10)
                              << "... | MAC: " << client_info["mac_address"].get<string>() << "\033[0m\n";
+
+                        
+                        json host_reply;
+                        host_reply["hardware_id"] = get_node_hardware_id();
+                        host_reply["mac_address"] = get_local_mac_address();
+                        string host_reply_str = host_reply.dump();
+                        uint32_t host_reply_len = host_reply_str.length();
+                        send_exact(client_fd, &host_reply_len, sizeof(host_reply_len));
+                        send_exact(client_fd, host_reply_str.c_str(), host_reply_len);
                     }
                     catch (...)
                     {
@@ -482,7 +498,7 @@ void Cloud::client_mesh(const vector<string> &args)
         return;
     }
 
-    // 2. UDP Discovery (Only runs if no --ip is provided) -- this is the "voxel client VXLZZZ" path
+    
     if (host_ip.empty())
     {
         cout << "\033[1;36mBroadcasting for Voxel Host with Token [" << target_token << "]...\033[0m\n";
@@ -585,6 +601,8 @@ void Cloud::client_mesh(const vector<string> &args)
     out.write(payload_data.data(), payload_data.size());
     out.close();
     Cloud::unpack_repository(download_path);
+    // Ensure mesh folder exists on the client side
+    fs::create_directories(".voxel/mesh");
     json client_identity;
     client_identity["hardware_id"] = get_node_hardware_id();
     client_identity["mac_address"] = get_local_mac_address();
@@ -593,6 +611,33 @@ void Cloud::client_mesh(const vector<string> &args)
 
     send_exact(tcp_fd, &json_len, sizeof(json_len));
     send_exact(tcp_fd, json_str.c_str(), json_len);
+
+    // Receive and persist host identity (ip, mac, hardware_id)
+    uint32_t host_json_len = 0;
+    if (recv_exact(tcp_fd, &host_json_len, sizeof(host_json_len)) && host_json_len > 0 && host_json_len < 65536)
+    {
+        string host_json_buf(host_json_len, '\0');
+        if (recv_exact(tcp_fd, &host_json_buf[0], host_json_len))
+        {
+            try
+            {
+                json host_info = json::parse(host_json_buf);
+                host_info["ip_address"] = host_ip;
+                host_info["timestamp"] = Commands::get_current_timestamp();
+
+                ofstream out_json(".voxel/mesh/host_info.json");
+                out_json << host_info.dump(4);
+                out_json.close();
+
+                cout << "\033[1;36m[Mesh] Host identity recorded in .voxel/mesh/host_info.json\033[0m\n";
+            }
+            catch (...)
+            {
+                cerr << "\033[1;31m[Mesh Error] Failed to save host identity.\033[0m\n";
+            }
+        }
+    }
+
     close(tcp_fd);
     cout << "\033[1;32mSuccessfully synced and registered node with Mesh Host!\033[0m\n";
 }
