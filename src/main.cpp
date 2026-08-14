@@ -426,7 +426,14 @@ int main(int argc, char *argv[]){
         }
         diffEngine::diff_pdf(pdf_args);
     }
+    else if(command == "pull"){
+        vector<string> pull_args;
+        for (int i = 2; i < argc; i++) {
+            pull_args.push_back(argv[i]);
+        }
+        Cloud::pull_repository(pull_args);
     
+    }
     
     else
     {

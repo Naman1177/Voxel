@@ -392,73 +392,139 @@ void Cloud::host_mesh(const vector<string> &args){
             int client_fd = accept(tcp_fd, (struct sockaddr *)&client_addr, &addr_len);
 
             string client_ip = inet_ntoa(client_addr.sin_addr);
-            cout << "\033[1;32m[Mesh] Incoming sync request from IP: " << client_ip << "\033[0m\n";
+            cout << "\033[1;32m[Mesh] Incoming TCP connection from IP: " << client_ip << "\033[0m\n";
 
-            uint32_t sha_len = payload_sha256.length();
-            bool ok = send_exact(client_fd, &sha_len, sizeof(sha_len));
-            ok = ok && send_exact(client_fd, payload_sha256.c_str(), sha_len);
-            uint64_t file_size = payload_bytes.size();
-            ok = ok && send_exact(client_fd, &file_size, sizeof(file_size));
+            // Use a micro-poll to detect if the client is speaking first (PULL mode)
+            pollfd client_pfd;
+            client_pfd.fd = client_fd;
+            client_pfd.events = POLLIN;
+            int is_pull = poll(&client_pfd, 1, 500); // 500ms timeout
 
-            if (!ok)
-            {
-                cerr << "\033[1;31m[Mesh Error] Client disconnected before header exchange completed.\033[0m\n";
-                close(client_fd);
-                continue;
-            }
-
-            size_t total_sent = 0;
-            while (total_sent < file_size)
-            {
-                size_t chunk = min<size_t>(BUFFER_SIZE, file_size - total_sent);
-                ssize_t bytes_pushed = send(client_fd, payload_bytes.data() + total_sent, chunk, 0);
-
-                if (bytes_pushed <= 0)
-                {
-                    cerr << "\033[1;31m[Mesh Error] Client disconnected during transfer.\033[0m\n";
-                    break; // Stop sending if the connection breaks
-                }
-
-                total_sent += bytes_pushed; // Only add the bytes that ACTUALLY sent!
-            }
-            uint32_t json_len = 0;
-            if (recv_exact(client_fd, &json_len, sizeof(json_len)) && json_len > 0 && json_len < 65536)
-            {
-                string json_buf(json_len, '\0');
-                if (recv_exact(client_fd, &json_buf[0], json_len))
-                {
-                    try
-                    {
-                        json client_info = json::parse(json_buf);
-                        client_info["ip_address"] = client_ip;
-                        client_info["timestamp"] = Commands::get_current_timestamp();
-
-                        connections_ledger["connections"].push_back(client_info);
-
-                        ofstream out_json(".voxel/mesh/connections.json");
-                        out_json << connections_ledger.dump(4);
-                        out_json.close();
-
-                        cout << "\033[1;32m[Mesh Registered] Node: "
-                             << client_info["hardware_id"].get<string>().substr(0, 10)
-                             << "... | MAC: " << client_info["mac_address"].get<string>() << "\033[0m\n";
-
+            if (is_pull > 0 && (client_pfd.revents & POLLIN)) {
+                
+                uint32_t req_len = 0;
+                if (recv_exact(client_fd, &req_len, sizeof(req_len)) && req_len > 0) {
+                    string req_buf(req_len, '\0');
+                    if (recv_exact(client_fd, &req_buf[0], req_len)) {
+                        json req = json::parse(req_buf);
                         
-                        json host_reply;
-                        host_reply["hardware_id"] = get_node_hardware_id();
-                        host_reply["mac_address"] = get_local_mac_address();
-                        string host_reply_str = host_reply.dump();
-                        uint32_t host_reply_len = host_reply_str.length();
-                        send_exact(client_fd, &host_reply_len, sizeof(host_reply_len));
-                        send_exact(client_fd, host_reply_str.c_str(), host_reply_len);
+                        // 1. Verify Zero-Trust Hardware Ledger
+                        bool verified = false;
+                        for (const auto& node : connections_ledger["connections"]) {
+                            if (node["hardware_id"] == req["hardware_id"]) {
+                                verified = true; 
+                                break;
+                            }
+                        }
+
+                        if (!verified) {
+                            cerr << "\033[1;31m[Mesh Security] Blocked unauthorized pull request from unregistered hardware.\033[0m\n";
+                            close(client_fd);
+                            continue;
+                        }
+
+                        // 2. Dynamic Packing based on Request Target
+                        string pack_target = ".voxel/mesh/live_payload.vxlpack";
+                        if (req["action"] == "PULL") {
+                            if (req["target"] == "ALL") {
+                                vector<string> args = { ".voxel/mesh/live_payload" };
+                                Cloud::pack_repository(args); 
+                            } else {
+                                Cloud::pack_targeted_branch(req["target"], pack_target);
+                            }
+                        }
+
+                        // 3. Send Payload (Using your robust chunked sender)
+                        string targeted_bytes = FileSystem::read_file_to_string(pack_target);
+                        string targeted_sha = Hashing::generate_sha256(targeted_bytes);
+                        
+                        uint32_t sha_len = targeted_sha.length();
+                        send_exact(client_fd, &sha_len, sizeof(sha_len));
+                        send_exact(client_fd, targeted_sha.c_str(), sha_len);
+                        
+                        uint64_t f_size = targeted_bytes.size();
+                        send_exact(client_fd, &f_size, sizeof(f_size));
+                        
+                        size_t t_sent = 0;
+                        while (t_sent < f_size) {
+                            size_t chunk = min<size_t>(BUFFER_SIZE, f_size - t_sent);
+                            ssize_t bytes_pushed = send(client_fd, targeted_bytes.data() + t_sent, chunk, 0);
+                            if (bytes_pushed <= 0) break;
+                            t_sent += bytes_pushed;
+                        }
+                        
+                        fs::remove(pack_target); // Clean up temp file
                     }
-                    catch (...)
+                }
+            } else {
+                // ==========================================================
+                // MODE B: INITIAL PAIRING (Host speaks first - YOUR ORIGINAL CODE)
+                // ==========================================================
+                uint32_t sha_len = payload_sha256.length();
+                bool ok = send_exact(client_fd, &sha_len, sizeof(sha_len));
+                ok = ok && send_exact(client_fd, payload_sha256.c_str(), sha_len);
+                uint64_t file_size = payload_bytes.size();
+                ok = ok && send_exact(client_fd, &file_size, sizeof(file_size));
+
+                if (!ok)
+                {
+                    cerr << "\033[1;31m[Mesh Error] Client disconnected before header exchange completed.\033[0m\n";
+                    close(client_fd);
+                    continue;
+                }
+
+                size_t total_sent = 0;
+                while (total_sent < file_size)
+                {
+                    size_t chunk = min<size_t>(BUFFER_SIZE, file_size - total_sent);
+                    ssize_t bytes_pushed = send(client_fd, payload_bytes.data() + total_sent, chunk, 0);
+
+                    if (bytes_pushed <= 0)
                     {
-                        cerr << "\033[1;31m[Mesh Error] Failed to parse client identity payload.\033[0m\n";
+                        cerr << "\033[1;31m[Mesh Error] Client disconnected during transfer.\033[0m\n";
+                        break; 
+                    }
+
+                    total_sent += bytes_pushed; 
+                }
+                
+                uint32_t json_len = 0;
+                if (recv_exact(client_fd, &json_len, sizeof(json_len)) && json_len > 0 && json_len < 65536)
+                {
+                    string json_buf(json_len, '\0');
+                    if (recv_exact(client_fd, &json_buf[0], json_len))
+                    {
+                        try
+                        {
+                            json client_info = json::parse(json_buf);
+                            client_info["ip_address"] = client_ip;
+                            client_info["timestamp"] = Commands::get_current_timestamp();
+
+                            connections_ledger["connections"].push_back(client_info);
+
+                            ofstream out_json(".voxel/mesh/connections.json");
+                            out_json << connections_ledger.dump(4);
+                            out_json.close();
+
+                            cout << "\033[1;32m[Mesh Registered] Node: "
+                                 << client_info["hardware_id"].get<string>().substr(0, 10)
+                                 << "... | MAC: " << client_info["mac_address"].get<string>() << "\033[0m\n";
+
+                            json host_reply;
+                            host_reply["hardware_id"] = get_node_hardware_id();
+                            host_reply["mac_address"] = get_local_mac_address();
+                            string host_reply_str = host_reply.dump();
+                            uint32_t host_reply_len = host_reply_str.length();
+                            send_exact(client_fd, &host_reply_len, sizeof(host_reply_len));
+                            send_exact(client_fd, host_reply_str.c_str(), host_reply_len);
+                        }
+                        catch (...)
+                        {
+                            cerr << "\033[1;31m[Mesh Error] Failed to parse client identity payload.\033[0m\n";
+                        }
                     }
                 }
             }
-
             close(client_fd);
         }
     }
@@ -663,4 +729,233 @@ void Cloud::mesh_off(const vector<string> &args)
     } else {
         cout << "\033[1;33mNo active Mesh session found.\033[0m\n";
     }
+}
+void Cloud::pack_targeted_branch(const string &branch_name, const string &output_filename){
+    string ref_path = ".voxel/refs/heads/" + branch_name;
+    if (!fs::exists(ref_path)) {
+        cerr << "\033[1;31mError: Branch '" << branch_name << "' not found on host.\033[0m\n";
+        return;
+    }
+    cout << "\033[1;36m[Voxel Pack] Tracing graph lineage for '" << branch_name << "'...\033[0m\n";
+    string latest_commit = FileSystem::read_file_to_string(ref_path);
+    latest_commit.erase(std::remove_if(latest_commit.begin(), latest_commit.end(), ::isspace), latest_commit.end());
+    set<string> required_objects;
+    string current_commit = latest_commit;
+    while (!current_commit.empty() && current_commit != string(64, '0')){
+        required_objects.insert(current_commit);
+        string obj_path = ".voxel/objects/" + current_commit;
+        if (!fs::exists(obj_path)) break;
+        string commit_data = FileSystem::read_file_to_string(obj_path);
+        istringstream stream(commit_data);
+        string line;
+        string parent_hash = "";
+        while (getline(stream, line)) {
+            if (line.rfind("tree - ", 0) == 0) {
+                string tree_hash = line.substr(7);
+                tree_hash.erase(std::remove_if(tree_hash.begin(), tree_hash.end(), ::isspace), tree_hash.end());
+                required_objects.insert(tree_hash);
+                string tree_path = ".voxel/objects/" + tree_hash;
+                if (fs::exists(tree_path)) {
+                    istringstream tree_stream(FileSystem::read_file_to_string(tree_path));
+                    string t_line;
+                    while (getline(tree_stream, t_line)) {
+                        stringstream ss(t_line);
+                        string filepath, file_hash;
+                        ss >> filepath >> file_hash;
+                        if (!file_hash.empty()) required_objects.insert(file_hash);
+                    }
+                }
+            } else if (line.rfind("parent - ", 0) == 0) {
+                parent_hash = line.substr(9);
+                parent_hash.erase(std::remove_if(parent_hash.begin(), parent_hash.end(), ::isspace), parent_hash.end());
+            }
+            
+        }
+        current_commit = parent_hash;
+       
+    }
+    ofstream out(output_filename, std::ios::binary);
+    out.write("VXLPAK01", 8);
+    auto write_file_to_pack = [&](const std::string &filepath, const std::string &disk_path) {
+        string content = FileSystem::read_file_to_string(disk_path);
+        uint32_t path_len = filepath.size();
+        out.write(reinterpret_cast<const char *>(&path_len), sizeof(path_len));
+        out.write(filepath.c_str(), path_len);
+        uint32_t content_len = content.size();
+        out.write(reinterpret_cast<const char *>(&content_len), sizeof(content_len));
+        out.write(content.c_str(), content_len);
+    };
+    for (const string& obj : required_objects) {
+        write_file_to_pack(".voxel/objects/" + obj, ".voxel/objects/" + obj);
+    }
+    write_file_to_pack(".voxel/refs/heads/" + branch_name, ".voxel/refs/heads/" + branch_name);
+    out.close();
+}
+void Cloud::pull_repository(const vector<string> &args) {
+    string mesh_info_path = ".voxel/mesh/host_info.json";
+    if (!fs::exists(mesh_info_path)) {
+        cerr << "\033[1;31mError: No host connection found. Run 'voxel client <token>' first to pair.\033[0m\n";
+        return;
+    }
+
+    string target_branch = "ALL";
+    if (!args.empty()) {
+        target_branch = args[0];
+    }
+
+    string live_mac = get_local_mac_address();
+    string live_hwid = Commands::get_hardware_uuid() + "_voxel_p2p_node";
+    string secured_hwid = Hashing::generate_sha256(live_hwid);
+    
+    json host_info;
+    ifstream info_file(mesh_info_path);
+    info_file >> host_info;
+    info_file.close();
+    
+    string host_ip = host_info["ip_address"];
+    
+    int tcp_fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in tcp_host_addr{};
+    tcp_host_addr.sin_family = AF_INET;
+    tcp_host_addr.sin_port = htons(TCP_TRANSFER_PORT);
+    inet_pton(AF_INET, host_ip.c_str(), &tcp_host_addr.sin_addr);
+
+    if (connect(tcp_fd, (struct sockaddr *)&tcp_host_addr, sizeof(tcp_host_addr)) < 0) {
+        cerr << "\033[1;31mError: Host offline or out of range. Connection refused.\033[0m\n";
+        close(tcp_fd);
+        return;
+    }
+
+    json request;
+    request["action"] = "PULL";
+    request["target"] = target_branch;
+    request["hardware_id"] = secured_hwid;
+    request["mac_address"] = live_mac;
+    
+    string req_str = request.dump();
+    uint32_t req_len = req_str.length();
+    send_exact(tcp_fd, &req_len, sizeof(req_len));
+    send_exact(tcp_fd, req_str.c_str(), req_len);
+    
+    uint32_t sha_len = 0;
+    if (!recv_exact(tcp_fd, &sha_len, sizeof(sha_len))) {
+        cerr << "\033[1;31mError: Host dropped connection (Identity verification likely failed).\033[0m\n";
+        close(tcp_fd);
+        return;
+    }
+    
+    string expected_sha(sha_len, '\0');
+    recv_exact(tcp_fd, &expected_sha[0], sha_len);
+
+    uint64_t file_size = 0;
+    recv_exact(tcp_fd, &file_size, sizeof(file_size));
+
+    string payload_data;
+    payload_data.resize(file_size);
+    if (!recv_exact(tcp_fd, &payload_data[0], file_size)) {
+        cerr << "\033[1;31mError: Connection dropped mid-transfer.\033[0m\n";
+        close(tcp_fd);
+        return;
+    }
+    close(tcp_fd);
+    
+    if (Hashing::generate_sha256(payload_data) != expected_sha) {
+        cerr << "\033[1;31mError: Payload corrupted during transit.\033[0m\n";
+        return;
+    }
+    
+    cout << "\033[1;32mSecure Payload received. Extracting to isolation tier...\033[0m\n";
+    
+    // 1. Save the downloaded pack
+    string pull_temp = "incoming_pull.vxlpack";
+    ofstream out(pull_temp, ios::binary);
+    out.write(payload_data.data(), payload_data.size());
+    out.close();
+    
+    // 2. Create the isolation sandbox
+    string safe_sandbox = "incoming_mesh_sandbox";
+    fs::create_directories(safe_sandbox);
+
+    // 3. SHIELDED EXTRACTION: Unpack safely into the sandbox
+    ifstream in(pull_temp, std::ios::binary);
+    char magic[9] = {0};
+    in.read(magic, 8);
+    
+    if (string(magic) == "VXLPAK01") {
+        while (in.peek() != EOF) {
+            uint32_t path_len = 0;
+            if (!in.read(reinterpret_cast<char *>(&path_len), sizeof(path_len))) break;
+
+            string filepath(path_len, '\0');
+            in.read(&filepath[0], path_len);
+
+            uint32_t content_len = 0;
+            in.read(reinterpret_cast<char *>(&content_len), sizeof(content_len));
+
+            string content(content_len, '\0');
+            in.read(&content[0], content_len);
+
+            // SHIELD: Ignore the host's configuration file so the client's identity remains untouched
+            if (filepath == ".voxel/config" || filepath == ".voxelignore") {
+                continue;
+            }
+
+            // Route paths from ".voxel/..." to our sandbox folder
+            string sandbox_path = filepath;
+            if (filepath.find(".voxel/") == 0) {
+                sandbox_path = safe_sandbox + "/" + filepath.substr(7);
+            } else {
+                sandbox_path = safe_sandbox + "/" + filepath;
+            }
+
+            fs::path dest_path(sandbox_path);
+            if (dest_path.has_parent_path()) {
+                fs::create_directories(dest_path.parent_path());
+            }
+
+            ofstream out_file(sandbox_path, std::ios::binary);
+            out_file.write(content.c_str(), content_len);
+            out_file.close();
+        }
+    } else {
+        cerr << "\033[1;31mError: Invalid payload signature.\033[0m\n";
+        in.close();
+        fs::remove(pull_temp);
+        fs::remove_all(safe_sandbox);
+        return;
+    }
+    in.close();
+
+    // 4. Move the newly pulled, zstd-compressed objects into the LIVE database
+    string sandbox_objects = safe_sandbox + "/objects";
+    if (fs::exists(sandbox_objects)) {
+        if (!fs::exists(".voxel/objects")) fs::create_directories(".voxel/objects");
+        for (const auto& entry : fs::directory_iterator(sandbox_objects)) {
+            fs::copy_file(entry.path(), ".voxel/objects/" + entry.path().filename().string(), fs::copy_options::overwrite_existing);
+        }
+    }
+
+    // 5. Safely copy the pulled branch pointer to the live refs folder as "_mesh"
+    string active_branch = Commands::get_current_branch_name();
+    string incoming_branch_name = (target_branch == "ALL") ? active_branch : target_branch;
+    string incoming_mesh_ref = incoming_branch_name + "_mesh";
+    
+    string sandbox_ref = safe_sandbox + "/refs/heads/" + incoming_branch_name;
+    if (fs::exists(sandbox_ref)) {
+        if (!fs::exists(".voxel/refs/heads")) fs::create_directories(".voxel/refs/heads");
+        fs::copy_file(sandbox_ref, ".voxel/refs/heads/" + incoming_mesh_ref, fs::copy_options::overwrite_existing);
+    } else {
+        cerr << "\033[1;31mError: Target branch '" << incoming_branch_name << "' not found in the pulled payload.\033[0m\n";
+        fs::remove(pull_temp);
+        fs::remove_all(safe_sandbox);
+        return;
+    }
+
+    // 6. Execute the Merge Engine
+    cout << "\033[1;33mRouting updated code into sandbox conflict engine...\033[0m\n";
+    merge::execute(active_branch, incoming_mesh_ref);
+
+    // 7. Clean up the sandbox
+    fs::remove(pull_temp);
+    fs::remove_all(safe_sandbox);
 }

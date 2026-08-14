@@ -16,8 +16,8 @@ public:
         std::string author;
         std::string timestamp;
         std::string message;
-        std::set<std::string> branches; // Branch tracking flags anchored here
-        std::vector<std::string> children; // Forward links mapped out by engine
+        std::set<std::string> branches; 
+        std::vector<std::string> children;
     };
     static string get_current_timestamp();
     static void track_all_files();
@@ -41,8 +41,9 @@ public:
     static void setup_global_identity();
     static void who();
     static void configure_model();
-private:
     static string get_hardware_uuid();
+private:
+    
     static void checkout_files_from_tree(const std::string& tree_hash);
     static bool is_snapshot_empty();
     static string get_user_name();

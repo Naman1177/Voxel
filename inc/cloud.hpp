@@ -15,6 +15,8 @@ public:
     static void host_mesh(const vector<string>& args);
     static void client_mesh(const vector<string>& args);
     static void mesh_off(const vector<string>& args);
+    static void pack_targeted_branch(const string &branch_name, const string &output_filename);
+    static void pull_repository(const vector<string> &args);
 };
 
 
