@@ -1,185 +1,228 @@
-
-
 # Voxel
 
-**A fast, lightweight, local-first version control system — with AI built in.**
+**A fast, local-first version control system — with AI built in.**
 
-*Think Git, rebuilt from scratch in C++ for speed, simplicity, and a friendlier vocabulary.*
+Voxel is Git-like in spirit, but rebuilt from scratch in C++ with its own storage format, its own diff/merge engine, and a friendlier vocabulary. This document explains **how Voxel actually works and how to think about it** — not the exact commands to type. For that, see [`Commands.md`](Commands.md).
 
-</div>
-
----
-
-## What is Voxel?
-
-Voxel is a standalone version control system (VCS), similar in spirit to Git, that you run from your terminal to track changes to a project over time. You `track` files, `commit` snapshots of your work, create `branch`es to work on different ideas in parallel, and `restore` your workspace to any point in its history.
-
-Voxel was built as a from-scratch engine (not a Git wrapper) with a few goals:
-
-- **Speed and a light footprint.** Independent benchmarking against Git on the same machine showed Voxel completing core operations (`init`, `track`, `commit`, `status`, `log`, `graph`, snapshotting, and `restore`) several times faster, using roughly a third of the peak memory and a fraction of the CPU instructions. See [`Benchmarks.md`](Benchmarks.md) for the full numbers and explanation.
-- **A simpler mental model.** Plain-English commands (`track`, `freeze`, `where`, `snapshot`/`snapback`, `bin`/`revive`) instead of Git's sometimes-cryptic terminology.
-- **Built-in AI assistance.** Voxel can generate commit messages, review your code, and explain diffs in plain English using an AI provider you connect.
-- **Smart binary handling.** Voxel automatically detects binary/media file types (images, video, audio, 3D models, archives) and stores them as raw bytes instead of wasting time trying to compress or diff them.
-- **Local peer-to-peer sharing.** No server required — you can pack a repository into a single file, or beam it directly to a teammate on the same network.
-
-Voxel is not a drop-in Git replacement and does not use Git's on-disk format — it's an independent implementation with its own repository layout (`.voxel/`), its own object model, and its own history graph.
-
----
-
-## How Voxel thinks about your project
-
-Every Voxel repository lives inside a hidden `.voxel/` folder at the root of your project (created by `voxel init`), alongside a `.voxelignore` file where you can list folders, paths, or file extensions you never want tracked.
-
-The core concepts:
-
-| Concept | What it means in Voxel |
+| I want to... | Go to |
 | --- | --- |
-| **Workspace** | The actual files on disk that you're editing. |
-| **Index** | The list of files you've explicitly `track`ed and are ready to be included in the next commit. |
-| **Commit** | A permanent, named snapshot of your tracked files at a point in time, linked to the commit before it (its "parent"). |
-| **Branch** | A named, moving pointer to a commit — lets you develop different lines of work side by side. |
-| **HEAD** | A pointer to whichever branch (and therefore commit) you currently have checked out. |
-| **Snapshot** | A *temporary*, single-slot scratchpad of your current workspace — separate from the permanent commit history. Think "undo point," not "save file." |
-| **Bin** | A soft-delete area for commits and branches you've removed but might want back, instead of destroying them outright. |
-
-Commits form a tree of history that you can view as a simple list (`log`) or as a full branching graph (`graph`), and you can export that graph as a PDF for documentation or presentations (`export`).
+| 🚀 Install Voxel | [`installation.md`](installation.md) |
+| 📖 See every command & flag | [`Commands.md`](Commands.md) |
+| 📊 See it benchmarked against Git | [`Benchmarks.md`](Benchmarks.md) |
 
 ---
 
-## Installation
+## The big idea
 
-Voxel is written in C++17 and builds with CMake. It bundles its own dependencies (Zstandard for compression, mbedTLS for SHA-256 hashing, `dtl` for diffing, and a JSON parser for AI/network payloads), so there's nothing extra to install beyond a C++ compiler and CMake itself.
+Every project you put under Voxel gets a hidden `.voxel/` folder at its root. That folder *is* the repository — your entire history, every branch, every saved version of every file, lives inside it. The rest of your project, the files you actually see and edit, is your **workspace**.
 
-### Prerequisites
+Voxel's whole job is managing the relationship between those two things.
 
-- A C++17-capable compiler (Clang or GCC)
-- CMake 3.15+
-- Git (only needed to clone the source)
-
-### Build from source
-
-```bash
-git clone https://github.com/Naman1177/Voxel.git
-cd Voxel
-cmake -B build -S .
-cmake --build build
-```
-
-This produces a `voxel` executable inside the `build/` directory. Optionally install it system-wide so you can run `voxel` from anywhere:
-
-```bash
-cmake --install build
-```
-
-### Homebrew (macOS/Linux, if the tap is available to you)
-
-```bash
-brew tap Naman1177/voxel
-brew install voxel
-```
-
-### Verify it worked
-
-```bash
-voxel
-```
-
-Running `voxel` with no arguments prints the built-in command list — if you see that, you're ready to go.
+| Term | What it means in Voxel |
+| --- | --- |
+| **Workspace** | The live files on disk, exactly as you're editing them. |
+| **Index** | The list of files you've `track`ed and are ready to be included in the next commit. |
+| **Commit** | A permanent, hashed snapshot of your tracked files, linked to the commit before it. |
+| **Branch** | A named, moving pointer to a commit. |
+| **HEAD** | A pointer to whichever branch (and commit) you currently have checked out. |
+| **Snapshot** | A *temporary*, single-slot scratchpad of your workspace — not history. |
+| **Bin** | A soft-delete area for commits/branches you removed but might want back. |
 
 ---
 
-## Quick start
-
-```bash
-# 1. Create a new project folder and step into it
-mkdir my-project && cd my-project
-
-# 2. Turn it into a Voxel repository
-voxel init
-
-# 3. Add some files, then tell Voxel to start tracking everything
-echo "hello world" > notes.txt
-voxel track
-
-# 4. Take your first permanent snapshot (a "commit")
-voxel commit -m "Initial commit"
-
-# 5. Check what's changed since your last commit
-voxel status
-
-# 6. See your history
-voxel log
-```
-
-From here you can branch off to try something new, snapshot your in-progress work before doing something risky, or hand the whole repository to a teammate over Wi-Fi. All of that — and every other command — is documented in detail, with every accepted argument form, in **[`Commands.md`](Commands.md)**.
-
----
-
-## Feature tour
-
-### 📁 Tracking & committing
-`track` stages every file in your workspace (respecting `.voxelignore`); `commit` (or its alias `freeze`) permanently saves that state to history, either with a message you type or one an AI writes for you (`commit ai`). `status` shows you, file by file, what's untracked, modified, or already tracked and unchanged.
-
-### 🌿 Branching
-`branch` creates a new line of development from your current position; `switch` moves between branches; `where` tells you which one you're on right now. `diverge` is a power-move version of branching: it lets you spin up a brand-new branch starting from *any* historical commit, not just your current one.
-
-### 🕰 Time travel
-`restore` rewinds (or fast-forwards) your entire workspace to any commit — addressed by its hash, a shortened hash prefix, a branch name, `head`, or the current position — and even supports "N commits back from here" shorthand like `main-3` or `a1b2c3d4-2`. Every `restore` automatically takes a safety snapshot first.
-
-### 💾 Snapshots (a single-slot stash)
-`snapshot` captures your current, uncommitted workspace state into a private scratch area; `snapback` restores it; `snapclear` wipes it. Unlike commits, there's only ever one snapshot slot — it's meant for "let me quickly try something and be able to undo it," not long-term storage.
-
-### 🗑 Bin & revive (soft delete)
-`bin` moves a commit or branch out of your active history without destroying it — child commits are automatically re-linked to the parent above the removed commit, so your history stays connected. `revive` brings a binned commit or branch back.
-
-### 🔍 Diffing & visual history
-`diff` shows you a structural, block-aware comparison between any two commits, branches, or your live workspace — not just raw line noise. `log` prints a linear history; `graph` renders the full branching commit graph; `export` turns that graph into a shareable PDF.
-
-### 🔀 Merging
-`merge` brings the changes from one branch into another using a three-way merge (comparing both branches against their common ancestor), and drops you into an interactive prompt to resolve any conflicting sections by hand when needed.
-
-### 🤖 AI assistance
-`login` connects Voxel to an AI provider using your API key. Once connected: `commit ai` writes your commit message for you by looking at what actually changed; `review` has the AI read through a file (or your whole project) and suggest fixes, with the option to apply them directly; `diff -ai` explains a diff to you in plain language instead of (or alongside) the raw structural output.
-
-### ☁️ Sharing without a server
-`pack` bundles an entire repository — history, branches, ignore rules, everything — into a single portable `.vxlpack` file; `unpack` rebuilds a repository from one. For live sharing, `host` broadcasts your repository to your local network with a pairing token, `client` connects to a host and pulls the repository down, and `meshoff` shuts a hosting session down.
-
-### 🪪 Identity
-`who` shows your local Voxel identity (name, email, and a hardware-derived node ID used for peer-to-peer pairing) — set up automatically the first time you run `init`, and editable through `login`.
-
----
-
-## Full command reference
-
-This README is the map — for the exhaustive, example-by-example breakdown of **every command, every flag, and every accepted argument style** (yes, including every valid way to write a `restore` target), see:
-
-➡️ **[`Commands.md`](Commands.md)**
-
----
-
-## The `.voxelignore` file
-
-`voxel init` automatically creates a `.voxelignore` file in your project root the first time you initialize a repository (it won't overwrite one you already have). Add one entry per line — a folder name, an exact path, or a file extension — for anything you never want Voxel to track. Lines starting with `#` are comments.
-
----
-
-## Project layout (for the curious)
+## How your work moves through Voxel
 
 ```
-Voxel-main/
-├── src/            # Implementation (Commands, repository, hashing, diffing, AI, cloud/mesh, etc.)
-├── inc/            # Public headers for each module
-├── third_party_lib/  # Bundled Zstandard, mbedTLS, dtl (diff library), and a JSON parser
-├── CMakeLists.txt  # Build configuration
-├── Benchmarks.md   # Head-to-head performance comparison against Git
-└── Commands.md      # Full command reference (this is the file to read next)
+ WORKSPACE  →  TRACKED (staged)  →  COMMIT (permanent history)
+ your files      "ready to save"      a saved point in time
 ```
+
+| Stage | What's happening | How safe is it? |
+| --- | --- | --- |
+| **Workspace** | Files as you're editing them right now | Not safe — nothing is recorded yet |
+| **Tracked / staged** | Voxel fingerprints each file and marks it "ready" | Still not permanent — a holding area, like a cart before checkout |
+| **Commit** | Everything staged is sealed into a permanent, hash-linked point in history | Permanent — kept forever unless you deliberately bin it |
+
+Every commit stores a link to its parent commit, so your whole history forms a connected chain, like frames in a film reel. You can write your own commit message, or let Voxel's AI read what actually changed and write one for you.
 
 ---
 
-## Notes & caveats
+## Branches
 
-- Voxel stores repository data in `.voxel/` at the project root — don't hand-edit files inside it.
-- Networking features (`host`/`client`/`meshoff`) are designed for trusted local networks (e.g., the same Wi-Fi/LAN) and are meant for quick, informal sharing rather than production hosting.
-- AI features require you to run `voxel login` and supply your own API key; nothing is sent anywhere until you do.
-- Voxel is under active development — command behavior may evolve between versions. Always check `Commands.md` in your installed version for the current behavior.
+A **branch** is a name pointing at a specific commit — a bookmark in history. Commit while "on" a branch, and the bookmark moves forward with you automatically.
+
+- Keep separate lines of work going side by side (`main` for your real progress, a second branch for an experiment) without either one touching the other.
+- Jump between branches any time — your workspace files update to match wherever you land.
+- Want to branch off from somewhere *back* in history instead of from where you are right now? Voxel lets you pick any past commit as the starting point for a brand-new branch — no need to disturb your current work to explore an old fork in the road.
+
+---
+
+## Snapshot vs. Commit — the distinction that matters most
+
+| | **Snapshot** | **Commit** |
+| --- | --- | --- |
+| What it is | A single, temporary scratch copy of your workspace | A permanent, hashed entry in your project's history |
+| How many can exist | Only **one** at a time — a new one overwrites the old | Unlimited — every commit is kept |
+| Where it lives | A private, throwaway holding area | The permanent commit chain (`log` / `graph`) |
+| What it's for | "Remember exactly what this looked like right now, just in case" | "This is a real, named point in my project's story" |
+| Gets cleared | Automatically, right after a successful commit | Never, unless you deliberately `bin` it |
+
+Voxel leans on snapshots as an internal safety net too — see below.
+
+---
+
+## Restore: Voxel's time travel, and why it isn't just "checkout"
+
+`restore` moves your **entire workspace** to match any point in history. It's the most powerful command in Voxel, and it behaves a little differently from Git's `checkout`/`switch` on purpose:
+
+| | Git `checkout` / `switch` | Voxel `restore` |
+| --- | --- | --- |
+| What moves | Usually just HEAD (and files, if you ask) | Your entire workspace, always, in one motion |
+| Detached state | Can leave you in a confusing "detached HEAD" | No detached state — you always land on a resolvable target |
+| `head`/`HEAD` meaning | Points at "here, right now" | Always means the repository's **very first commit** — the beginning of your timeline, not your current position |
+| Safety net | None built in — you can lose uncommitted work | Automatically takes a **snapshot before and after**, so the exact state you left is always one `snapback` away |
+| Relative addressing | `HEAD~2`, `HEAD^` | The same idea, spelled out: `main-3`, `a1b2c3d4-2` — "N commits back from this resolved target" |
+| Going too far back | Errors out | Safely stops at the root commit instead of failing |
+
+You can target a `restore` at: the tip of your current branch, the very first commit, a full or shortened commit hash, a branch name, or any of those stepped back N commits. Because `restore` overwrites files to match the target, Voxel treats every restore as a small, blast-radius-limited operation — snapshot first, move second, snapshot again after — so a restore is always reversible with a single `snapback`, even though it's technically destructive to your working files.
+
+---
+
+## Removing history without destroying it
+
+Sometimes a commit or branch is a dead end. Instead of forcing permanent deletion, Voxel has a **bin** — a soft-delete area.
+
+| Action | What happens |
+| --- | --- |
+| `bin` a commit | Removed from active history; its child is automatically re-linked to its parent, so the chain stays unbroken |
+| `bin` a branch | Removed from your branch list, data untouched |
+| `revive` | Brings a binned commit or branch straight back |
+| Root commit | Can never be binned — it's the foundation everything else is built on |
+
+---
+
+## The scope-aware diff engine
+
+Most VCS diffs compare files **line by line**, which is why a single reformatted brace can make a diff look like the whole function changed. Voxel's `diff` engine works differently: it first breaks each file into **logical scope blocks** — functions, classes, structs, whatever a scope boundary looks like in that file — and then compares scope-to-scope, not line-to-line.
+
+| Step | What Voxel does |
+| --- | --- |
+| 1. Segment | Splits old and new file versions into scope blocks (e.g. `function start_engine() { ... }`) |
+| 2. Exact match | Matches blocks that share the same scope name between versions |
+| 3. Fuzzy match | Catches **renamed** scopes by comparing content similarity, even when the header changed |
+| 4. Classify | Labels each remaining block `MODIFIED`, `ADDED`, or `DELETED` |
+| 5. Present | Shows you the diff grouped by scope, not by raw line number |
+
+The upshot: `diff` reads more like *"this function changed, this one was added, this one was deleted"* than a flood of `+`/`-` lines. Add `-ai` to any `diff` and Voxel's AI provider turns that scope-grouped structural diff into a plain-English explanation.
+
+---
+
+## Merging: three-way comparison inside a sandbox
+
+`merge` doesn't touch your real files until it's sure it's safe to. Here's the actual flow:
+
+| Step | What happens |
+| --- | --- |
+| 1. Common ancestor | Voxel finds the shared commit both branches grew out of |
+| 2. Three-way compare | Each side's changes are compared against that shared ancestor, not against each other directly |
+| 3. Sandbox | All merge output — auto-merged files, conflicting sections, everything — is written into a **temporary sandbox area**, never straight into your workspace |
+| 4. Conflict resolution | If both sides touched the same section, Voxel pauses and asks you to resolve it interactively |
+| 5. Apply | Only once the sandbox merge is fully resolved does Voxel copy the result into your actual workspace |
+
+This sandbox step is the safety net: if a merge goes badly or you back out midway, your real workspace was never touched in the first place — nothing to undo, because nothing landed yet.
+
+When a conflict comes up, you choose per section:
+
+| Choice | Result |
+| --- | --- |
+| **Ours** | Keep your current branch's version of that section |
+| **Theirs** | Keep the incoming branch's version |
+| **Both** | Keep yours, then theirs, back to back |
+
+Voxel refuses to merge a branch into itself, and refuses to run without a resolvable current branch.
+
+---
+
+## How Voxel treats different kinds of files
+
+Voxel inspects every file it tracks and decides how to store it — you never have to tell it which is which:
+
+| File type | How Voxel stores it | Why |
+| --- | --- | --- |
+| Text (code, config, docs, anything readable) | Compressed, and diffed scope-by-scope | Meaningful diffs, small footprint |
+| Binary/media (images, video, audio, 3D models, archives, PDFs) | Stored raw, byte-for-byte | Line diffing a `.png` or `.mp4` is meaningless — Voxel doesn't waste time trying |
+
+---
+
+## `.voxelignore`
+
+Created automatically the first time you initialize a repository (never overwritten if one already exists). Plain text, one rule per line:
+
+| You can list | Effect |
+| --- | --- |
+| A folder name | Skips everything inside it |
+| An exact file path | Skips just that file |
+| A file extension | Skips every file of that type, anywhere in the project |
+| A line starting with `#` | Treated as a comment, ignored |
+
+Every workspace-scanning operation — `status`, `track`, `snapshot`, and more — respects this file automatically, every time.
+
+---
+
+## Your Voxel identity (hardware ID)
+
+The first time you ever set up a repository on a machine, Voxel silently generates a permanent identity for that computer, derived from characteristics of the hardware itself. It stays the same across every project on that machine and can't be spoofed just by copying files around. `who` shows it to you any time.
+
+Its one job: when you share a repository directly with another computer (below), both machines can recognize and trust each other without any central server or account system in the middle. You never have to manage it — it just works quietly in the background.
+
+---
+
+## Sharing a project without a server
+
+| Method | How it works | Best for |
+| --- | --- | --- |
+| **Pack / unpack** | Bundles your whole repository — full history, branches, ignore rules — into one portable file | Emailing, archiving, dropping in shared storage |
+| **Host / client** | One machine broadcasts the repository live on the local network with a short-lived pairing token; the other connects and pulls it directly | Quick, trusted handoffs on the same Wi-Fi/LAN |
+
+No internet upload, no third-party server, no account required, either way.
+
+---
+
+## AI features
+
+Voxel can optionally connect to an AI provider:
+
+| Feature | What it does |
+| --- | --- |
+| `commit ai` | Writes your commit message by reading what actually changed |
+| `review` | Reads your code (one file or the whole project) and suggests fixes, with the option to apply them |
+| `diff -ai` | Explains a scope-aware diff in plain English |
+
+**By default, Voxel expects a Google Gemini API key.** You bring your own key — Voxel doesn't ship with one, and nothing leaves your machine until you connect a provider and run an AI command yourself. A handful of other providers are supported too if you'd rather use something else (full list in [`Commands.md`](Commands.md)). Every non-AI feature works exactly the same with no provider connected at all — AI is entirely optional on top of a fully functional VCS.
+
+---
+
+## What's keeping this fast and small
+
+| Component | Role |
+| --- | --- |
+| **Zstandard (zstd)** | Compresses your text files quickly and losslessly — how history holds many versions without `.voxel/` ballooning |
+| **mbedTLS** | Generates the SHA-256 fingerprint for every file and commit — instant "has this changed?" checks and unique, permanent commit IDs |
+
+Both are bundled inside Voxel — nothing extra to install.
+
+---
+
+## A couple of things worth knowing
+
+- Nothing inside `.voxel/` is meant to be edited by hand.
+- `host`/`client`/`meshoff` are built for trusted local networks and quick handoffs, not production hosting.
+- Voxel is under active development — [`Commands.md`](Commands.md) in your installed version is always the source of truth for current behavior.
+
+---
+
+## Credits
+
+**Voxel was designed and written by Naman Malhotra.**
+
+If Voxel's fast, or the AI commit messages saved you from writing "fix stuff" for the hundredth time, consider dropping a ⭐ on the repo — it genuinely helps.
