@@ -1355,10 +1355,13 @@ string merge::format_branch_name(const string &raw_name){
     string formatted = raw_name;
     return formatted;
 }
-void merge::execute(const string &current_branch, const string &incoming_branch){
+void merge::execute(const string &current_branch, const string &incoming_branch, bool use_ai){
     string target_branch = format_branch_name(current_branch);
     string source_branch = format_branch_name(incoming_branch);
     cout << "\033[1;36mVoxel Merge: Merging '" << source_branch << "' into '" << target_branch << "'...\033[0m\n";
+    if (use_ai) {
+        cout << "\033[1;35m[AI Merge] AI-assisted conflict resolution is ENABLED for this merge.\033[0m\n";
+    }
     string base_commit = merge::find_lowest_common_ancestor(source_branch, target_branch);
     if (base_commit.empty()) {
         cerr << "\033[1;31mError: No common ancestor found. Cannot proceed with merge. Try making a commit on both branches.\033[0m\n";
@@ -1392,9 +1395,12 @@ void merge::execute(const string &current_branch, const string &incoming_branch)
             // Binary/media asset (mp4, jpg, blend, etc.) - can't be line-merged
             // with dtl::Diff3, so it gets its own byte-level merge path instead
             // of being skipped entirely.
+            // Media/binary files can't be semantically merged by the AI text
+            // agent, so they always fall through to the manual size/keep
+            // prompt regardless of --ai.
             conflict = process_media_file_merge(file, target_branch, source_branch, base_commit);
         } else {
-            conflict = process_file_merge(file, target_branch, source_branch, base_commit);
+            conflict = process_file_merge(file, target_branch, source_branch, base_commit, use_ai);
         }
         if (conflict) {
             has_conflicts = true;
@@ -1437,7 +1443,7 @@ static vector<string> split_lines(const string& text) {
     }
     return lines;
 }
-bool merge::process_file_merge(const string &filepath, const string &target_branch, const string &source_branch, const string &base_commit) {
+bool merge::process_file_merge(const string &filepath, const string &target_branch, const string &source_branch, const string &base_commit, bool use_ai) {
     string base_content = merge::get_file_content_from_commit(base_commit, filepath);
     string ours_content = FileSystem::read_file_to_string(filepath);
     string theirs_content = merge::get_file_content_from_commit(merge::get_branch_commit(source_branch), filepath);
@@ -1499,6 +1505,14 @@ bool merge::process_file_merge(const string &filepath, const string &target_bran
             out << line << "\n";
         }
         return false; // Handled cleanly, no manual conflict!
+    }
+    if (use_ai) {
+        bool resolved = merge::resolve_conflict_ai(filepath, base_content, ours_content, theirs_content,
+                                                     target_branch, source_branch);
+        if (resolved) {
+            return true; // AI resolved it, still counts as a conflict that was handled
+        }
+        cout << "\033[1;33m[AI Merge] Falling back to manual resolution for " << filepath << ".\033[0m\n";
     }
     merge::resolve_conflict_interactive(filepath, base_lines, ours_lines, theirs_lines, target_branch, source_branch);
     return true;
@@ -1611,6 +1625,26 @@ static bool process_media_file_merge(const string &filepath, const string &targe
     }
 
     return true; // Required a manual decision, so it counts as a resolved conflict.
+}
+bool merge::resolve_conflict_ai(const string &filepath, const string &base_content, const string &ours_content,
+                                 const string &theirs_content, const string &target_branch, const string &source_branch) {
+    cout << "\033[1;35m[AI Merge] Conflict in " << filepath << " — asking Voxel AI to resolve...\033[0m\n";
+
+    string merged_code = ai::resolve_merge_conflict(filepath, base_content, ours_content, theirs_content,
+                                                      target_branch, source_branch);
+
+    if (merged_code.empty()) {
+        return false; // let the caller fall back to interactive resolution
+    }
+
+    fs::path dest = fs::path(SANDBOX_DIR) / filepath;
+    fs::create_directories(dest.parent_path());
+    ofstream out(dest, ios::trunc);
+    out << merged_code;
+    out.close();
+
+    cout << "\033[1;32m[AI Merge] " << filepath << " auto-resolved and staged in " << SANDBOX_DIR << "/\033[0m\n";
+    return true;
 }
 void merge::resolve_conflict_interactive(const string &filepath,const vector<string> &base_lines,const vector<string> &ours_lines,const vector<string> &theirs_lines,const string &target_branch,const string &source_branch) {
     bool has_conflict = false;

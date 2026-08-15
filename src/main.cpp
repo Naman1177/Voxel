@@ -311,26 +311,40 @@ int main(int argc, char *argv[]){
         std::string source_branch;
         std::string target_branch;
 
-        if (argc == 2) {
-            // Case 1: "voxel merge" 
+        // Pull out the --ai / -ai flag from anywhere in the args first, so
+        // the remaining positional args (branch names) parse exactly like
+        // before, regardless of where the flag was typed.
+        bool use_ai = false;
+        std::vector<std::string> positional;
+        for (int i = 2; i < argc; i++) {
+            std::string arg = argv[i];
+            if (arg == "--ai" || arg == "-ai") {
+                use_ai = true;
+            } else {
+                positional.push_back(arg);
+            }
+        }
+
+        if (positional.empty()) {
+            // Case 1: "voxel merge [--ai]"
             // Default behavior: Merge 'main' into current branch
             source_branch = "main";
-            target_branch = Commands::get_current_branch_name(); //
-        } 
-        else if (argc == 3) {
-            // Case 2: "voxel merge a" 
+            target_branch = Commands::get_current_branch_name();
+        }
+        else if (positional.size() == 1) {
+            // Case 2: "voxel merge a [--ai]"
             // Merge branch 'a' (source) into current branch (target)
-            source_branch = argv[2];
-            target_branch = Commands::get_current_branch_name(); //[cite: 9]
-        } 
-        else if (argc == 4) {
-            // Case 3: "voxel merge a b" 
+            source_branch = positional[0];
+            target_branch = Commands::get_current_branch_name();
+        }
+        else if (positional.size() == 2) {
+            // Case 3: "voxel merge a b [--ai]"
             // Out-of-tree merge: Merge branch 'a' (source) into branch 'b' (target)
-            source_branch = argv[2];
-            target_branch = argv[3];
-        } 
+            source_branch = positional[0];
+            target_branch = positional[1];
+        }
         else {
-            std::cerr << "\033[1;31mInvalid merge syntax.\033[0m\n";
+            std::cerr << "\033[1;31mInvalid merge syntax. Use 'voxel merge [source] [target] [--ai]'.\033[0m\n";
             return 1;
         }
 
@@ -347,7 +361,7 @@ int main(int argc, char *argv[]){
         }
 
         
-        merge::execute(target_branch, source_branch);
+        merge::execute(target_branch, source_branch, use_ai);
         Commands::restore_workspace_state("");
         Commands::clear_snapshot_silent();
         Commands::create_snapshot();

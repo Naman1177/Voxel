@@ -638,6 +638,79 @@ void ai::commit_with_ai()
     std::cout << "\033[1;36mHanding off to Voxel commit engine...\033[0m\n";
     Commands::commit_changes(ai_commit_msg);
 }
+std::string ai::resolve_merge_conflict(const std::string &filepath,const std::string &base_content,const std::string &ours_content,const std::string &theirs_content,const std::string &target_branch,const std::string &source_branch)
+{
+    ai::sendToAI ai_agent;
+
+    std::string payload = "FILE: " + filepath + "\n\n";
+    payload += "=== BASE (common ancestor) ===\n" + base_content + "\n\n";
+    payload += "=== OURS (branch: " + target_branch + ") ===\n" + ours_content + "\n\n";
+    payload += "=== THEIRS (branch: " + source_branch + ") ===\n" + theirs_content + "\n";
+
+    std::string system_prompt =
+        "You are Voxel's AI Merge Conflict Resolver, a semantic version control assistant.\n"
+        "You are given the BASE (common ancestor), OURS, and THEIRS versions of a single file "
+        "that could not be auto-merged line-by-line because both sides edited overlapping regions.\n\n"
+        "YOUR TASK:\n"
+        "1. Understand what OURS changed relative to BASE and what THEIRS changed relative to BASE.\n"
+        "2. Produce a single final version of the file that preserves the INTENT of both changes "
+        "wherever they don't truly contradict each other.\n"
+        "3. If the changes genuinely contradict (e.g. both sides rewrote the same logic differently), "
+        "pick the version that is more complete/correct, and briefly explain why in the explanation field.\n"
+        "4. NEVER leave conflict markers (<<<<<<<, =======, >>>>>>>) in the merged_code.\n"
+        "5. The merged_code must be the COMPLETE final content of the file, not a fragment/diff.\n"
+        "6. The merged_code must be syntactically valid and compilable/runnable.\n\n"
+        "STRICT OUTPUT RULES:\n"
+        "You MUST output ONLY a valid JSON object, nothing else, no markdown fences. Use this exact schema:\n"
+        "{\"explanation\": \"1-3 sentence explanation of how the conflict was resolved\", "
+        "\"merged_code\": \"the complete final merged file content\"}";
+
+    std::string raw_response = ai_agent.execute(system_prompt, payload);
+
+    if (raw_response.empty() || raw_response.find("Error:") == 0)
+    {
+        std::cerr << "\033[1;31m[AI Merge] Agent call failed: " << raw_response << "\033[0m\n";
+        return "";
+    }
+
+    try
+    {
+        std::string clean_json = raw_response;
+        size_t start = clean_json.find("```json");
+        if (start != std::string::npos)
+            clean_json.erase(start, 7);
+        else
+        {
+            start = clean_json.find("```");
+            if (start != std::string::npos)
+                clean_json.erase(start, 3);
+        }
+        size_t end = clean_json.rfind("```");
+        if (end != std::string::npos)
+            clean_json.erase(end, 3);
+
+        nlohmann::json parsed = nlohmann::json::parse(clean_json);
+
+        if (!parsed.contains("merged_code"))
+        {
+            std::cerr << "\033[1;31m[AI Merge] Response missing 'merged_code' key.\033[0m\n";
+            return "";
+        }
+
+        if (parsed.contains("explanation"))
+        {
+            std::cout << "\033[1;36m[AI Merge] Resolution for " << filepath << ":\033[0m\n";
+            std::cout << "  " << parsed["explanation"].get<std::string>() << "\n";
+        }
+
+        return parsed["merged_code"].get<std::string>();
+    }
+    catch (const nlohmann::json::parse_error &e)
+    {
+        std::cerr << "\033[1;31m[AI Merge] Failed to parse AI JSON response: " << e.what() << "\033[0m\n";
+        return "";
+    }
+}
 void ai::run_ai_diff(const std::string &filepath, const std::string &old_content, const std::string &new_content)
 {
     ai::sendToAI ai_agent;

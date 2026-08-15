@@ -20,6 +20,7 @@ public:
     static void execute_voxel_review(const std::vector<std::string>& files_to_review, const std::string& optional_note);
     static void commit_with_ai();
     static void run_ai_diff(const std::string& filepath, const std::string& old_content, const std::string& new_content);
+    static string resolve_merge_conflict(const std::string &filepath,const std::string &base_content,const std::string &ours_content,const std::string &theirs_content,const std::string &target_branch,const std::string &source_branch);
 
 
    class sendToAI {

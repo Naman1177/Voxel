@@ -49,8 +49,10 @@ public:
 
 class merge{
 public:
-    static void execute(const std::string& current_branch, const std::string& incoming_branch);
+    static void execute(const std::string &current_branch, const std::string &incoming_branch, bool use_ai = false);
     static string get_branch_commit(const std::string& branch_name);
+    static bool process_file_merge(const std::string &filepath, const std::string &target_branch,const std::string &source_branch, const std::string &base_commit, bool use_ai = false);
+    static bool resolve_conflict_ai(const std::string &filepath, const std::string &base_content,const std::string &ours_content, const std::string &theirs_content,const std::string &target_branch, const std::string &source_branch);
 private:
     static bool setup_sandbox();
     static void cleanup_sandbox();
@@ -58,7 +60,7 @@ private:
     static string find_lowest_common_ancestor(const std::string& branchA, const std::string& branchB);
     
     static string get_file_content_from_commit(const std::string& commit_hash, const std::string& filepath);
-    static bool process_file_merge(const std::string& filepath, const std::string& target_branch, const std::string& source_branch, const std::string& base_commit);
+    
     static void resolve_conflict_interactive(const std::string &filepath,const std::vector<std::string> &base_lines,const std::vector<std::string> &ours_lines,const std::vector<std::string> &theirs_lines,const std::string &target_branch,const std::string &source_branch);
     static std::string format_branch_name(const std::string& raw_name);
 };
