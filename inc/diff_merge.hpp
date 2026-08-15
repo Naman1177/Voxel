@@ -44,17 +44,19 @@ public:
     static void ai_diff(const std::vector<std::string> &args);
     static void report_media_file_diff(const std::string &file,const std::string &old_content,const std::string &new_content, bool old_existed, bool new_existed);
     static void diff_pdf(const std::vector<std::string> &args);
+    
 };
 
 class merge{
 public:
     static void execute(const std::string& current_branch, const std::string& incoming_branch);
+    static string get_branch_commit(const std::string& branch_name);
 private:
     static bool setup_sandbox();
     static void cleanup_sandbox();
     static void apply_sandbox_to_workspace();
     static string find_lowest_common_ancestor(const std::string& branchA, const std::string& branchB);
-    static string get_branch_commit(const std::string& branch_name);
+    
     static string get_file_content_from_commit(const std::string& commit_hash, const std::string& filepath);
     static bool process_file_merge(const std::string& filepath, const std::string& target_branch, const std::string& source_branch, const std::string& base_commit);
     static void resolve_conflict_interactive(const std::string &filepath,const std::vector<std::string> &base_lines,const std::vector<std::string> &ours_lines,const std::vector<std::string> &theirs_lines,const std::string &target_branch,const std::string &source_branch);

@@ -648,8 +648,31 @@ void Commands::checkout_files_from_tree(const std::string &tree_hash)
         return;
     }
 
+    // 🔥 Capture the CURRENT set of tracked files (from the existing index) BEFORE we
+    // overwrite it. This lets us detect files that belonged to the previous branch/tree
+    // but are absent from the target tree, so they can be removed from the workspace —
+    // mirroring how `git switch` / `git checkout` behaves.
+    std::set<std::string> previous_files;
+    if (fs::exists(".voxel/index"))
+    {
+        std::ifstream old_index(".voxel/index");
+        std::string old_line;
+        while (std::getline(old_index, old_line))
+        {
+            if (old_line.empty())
+                continue;
+            std::stringstream oss(old_line);
+            std::string old_filepath, old_hash;
+            oss >> old_filepath >> old_hash;
+            if (!old_filepath.empty())
+                previous_files.insert(old_filepath);
+        }
+        old_index.close();
+    }
+
     std::ifstream tree_file(tree_path);
     std::string line;
+    std::set<std::string> new_files;
 
     // 1. Loop through the tree and reconstruct the physical files
     while (std::getline(tree_file, line))
@@ -659,6 +682,8 @@ void Commands::checkout_files_from_tree(const std::string &tree_hash)
         std::stringstream ss(line);
         std::string filepath, file_hash;
         ss >> filepath >> file_hash;
+        if (!filepath.empty())
+            new_files.insert(filepath);
 
         std::string object_path = ".voxel/objects/" + file_hash;
         if (fs::exists(object_path))
@@ -700,7 +725,34 @@ void Commands::checkout_files_from_tree(const std::string &tree_hash)
     // Clear and close the file stream reader before resetting position bounds
     tree_file.close();
 
-    // 2. 🔥 SYNCHRONIZE STAGING INDEX AREA (Keep this at the bottom!)
+    // 2. 🔥 REMOVE FILES that were tracked in the previous state but do not exist in the
+    // target tree (e.g. a file added on another branch). Without this, switching branches
+    // would only ever overwrite/add files and never delete ones that shouldn't be there —
+    // which is exactly the bug being fixed here.
+    for (const auto &old_file : previous_files)
+    {
+        if (new_files.count(old_file))
+            continue; // still present in the target tree, nothing to remove
+
+        std::error_code ec;
+        if (fs::exists(old_file))
+        {
+            fs::remove(old_file, ec);
+        }
+
+        // Walk back up removing now-empty parent directories left behind by the
+        // deletion (but never touch the workspace root itself).
+        fs::path parent_dir = fs::path(old_file).parent_path();
+        while (!parent_dir.empty() && parent_dir != "." && fs::exists(parent_dir) &&
+               fs::is_directory(parent_dir) && fs::is_empty(parent_dir))
+        {
+            fs::path next_parent = parent_dir.parent_path();
+            fs::remove(parent_dir, ec);
+            parent_dir = next_parent;
+        }
+    }
+
+    // 3. 🔥 SYNCHRONIZE STAGING INDEX AREA (Keep this at the bottom!)
     std::ofstream index_sync(".voxel/index", std::ios::trunc);
     std::ifstream tree_sync(tree_path);
     if (tree_sync.is_open() && index_sync.is_open())

@@ -346,9 +346,11 @@ int main(int argc, char *argv[]){
             return 0;
         }
 
-        // Execute the merge pipeline strictly via static method[cite: 10]
-        // Note: diff_merge.hpp signature is execute(current_branch, incoming_branch)
-        merge::execute(target_branch, source_branch); 
+        
+        merge::execute(target_branch, source_branch);
+        Commands::restore_workspace_state("");
+        Commands::clear_snapshot_silent();
+        Commands::create_snapshot();
         return 0;
     }
     else if (command == "bin") {

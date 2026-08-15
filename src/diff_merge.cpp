@@ -549,6 +549,44 @@ static string get_file_blob_hash_from_commit(const string &commit_hash, const st
     }
     return ""; 
 }
+static vector<string> get_all_filepaths_from_commit(const string &commit_hash) {
+    vector<string> paths;
+    if (commit_hash.empty()) return paths;
+
+    string commit_path = ".voxel/objects/" + commit_hash;
+    if (!filesystem::exists(commit_path)) return paths;
+
+    string commit_data = FileSystem::read_file_to_string(commit_path);
+    istringstream commit_stream(commit_data);
+    string line;
+    string tree_hash = "";
+
+    // 1. Get the Tree Index hash (same lookup as get_file_blob_hash_from_commit)
+    while (getline(commit_stream, line)) {
+        if (line.find("tree - ") == 0) {
+            tree_hash = line.substr(7);
+            tree_hash.erase(tree_hash.find_last_not_of(" \n\r\t") + 1);
+            break;
+        }
+    }
+    if (tree_hash.empty()) return paths;
+
+    string tree_path = ".voxel/objects/" + tree_hash;
+    if (!filesystem::exists(tree_path)) return paths;
+
+    // 2. Walk every line of the tree and collect the full relative filepath
+    //    (first token on each line), not just the bare filename.
+    string tree_data = FileSystem::read_file_to_string(tree_path);
+    istringstream tree_stream(tree_data);
+    while (getline(tree_stream, line)) {
+        if (line.empty()) continue;
+        istringstream line_stream(line);
+        string filepath;
+        line_stream >> filepath;
+        if (!filepath.empty()) paths.push_back(filepath);
+    }
+    return paths;
+}
 void diffEngine::report_media_file_diff(const string &file,const string &old_content,const string &new_content,bool old_existed, bool new_existed)
 {
     if (!old_existed && new_existed)
@@ -1170,6 +1208,19 @@ struct MergeOpcode {
     size_t b1, b2; 
 };
 static const string SANDBOX_DIR = "sandbox_merge";
+static bool process_media_file_merge(const string &filepath, const string &target_branch, const string &source_branch, const string &base_commit);
+static string merge_format_human_size(uint64_t bytes) {
+    static const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+    double size = static_cast<double>(bytes);
+    int unit_idx = 0;
+    while (size >= 1024.0 && unit_idx < 4) {
+        size /= 1024.0;
+        unit_idx++;
+    }
+    ostringstream oss;
+    oss << fixed << setprecision(2) << size << " " << units[unit_idx];
+    return oss.str();
+}
 static vector<MergeOpcode> merge_diff_opcodes(const vector<string> &base,const vector<string> &other) {
     size_t n = base.size(), m = other.size();
     vector<vector<int>> dp(n + 1, vector<int>(m + 1, 0));
@@ -1314,15 +1365,37 @@ void merge::execute(const string &current_branch, const string &incoming_branch)
         return;
     }
     if (!setup_sandbox()) return;
-    vector<string> all_files = FileSystem::list_workspace_files();
+
+    // 🔥 Build the file list from the UNION of the current workspace, the
+    // merge base, and both branch tips — not just what happens to exist in
+    // the workspace right now. Previously this only used
+    // FileSystem::list_workspace_files(), so a file that was added only on
+    // the incoming branch (and therefore never checked out into the current
+    // workspace) was silently skipped and never made it into 'ours' after
+    // the merge, for both text and media files.
+    set<string> all_files_set;
+    for (const auto &f : FileSystem::list_workspace_files())
+        all_files_set.insert(f);
+    for (const auto &f : get_all_filepaths_from_commit(base_commit))
+        all_files_set.insert(f);
+    for (const auto &f : get_all_filepaths_from_commit(merge::get_branch_commit(target_branch)))
+        all_files_set.insert(f);
+    for (const auto &f : get_all_filepaths_from_commit(merge::get_branch_commit(source_branch)))
+        all_files_set.insert(f);
+    vector<string> all_files(all_files_set.begin(), all_files_set.end());
+
     bool has_conflicts = false;
     for (const auto& file : all_files){
         string ext = fs::path(file).extension().string();
+        bool conflict;
         if (Commands::should_ignore_extension(ext)) {
-            //add file system later
-            continue;
+            // Binary/media asset (mp4, jpg, blend, etc.) - can't be line-merged
+            // with dtl::Diff3, so it gets its own byte-level merge path instead
+            // of being skipped entirely.
+            conflict = process_media_file_merge(file, target_branch, source_branch, base_commit);
+        } else {
+            conflict = process_file_merge(file, target_branch, source_branch, base_commit);
         }
-        bool conflict = process_file_merge(file, target_branch, source_branch, base_commit);
         if (conflict) {
             has_conflicts = true;
         }
@@ -1338,6 +1411,17 @@ void merge::execute(const string &current_branch, const string &incoming_branch)
     if (user_confirmation == "yes" || user_confirmation == "Yes" || user_confirmation == "YES" || user_confirmation == "y" || user_confirmation == "Y"){
         apply_sandbox_to_workspace();
         cout << "\033[1;32mMerge applied successfully! Workspace updated.\033[0m\n";
+
+        // 🔥 Record the merge as a real commit on the target branch. Merging
+        // only ever touched the workspace + files on disk — it never moved
+        // the branch ref forward, so as far as any later "restore to this
+        // branch's latest commit" call is concerned, nothing happened here
+        // and the pre-merge commit is still the truth. That mismatch is what
+        // silently reverts merged files (media and text alike) the moment
+        // anything downstream re-syncs the workspace to HEAD. Re-tracking
+        // the now-merged workspace and committing it closes that gap.
+        Commands::track_all_files();
+        Commands::commit_changes("Merge branch '" + source_branch + "' into '" + target_branch + "'");
     }
     else {
         cout << "\033[1;31mMerge aborted by user. Workspace remains untouched.\033[0m\n";
@@ -1419,6 +1503,114 @@ bool merge::process_file_merge(const string &filepath, const string &target_bran
     merge::resolve_conflict_interactive(filepath, base_lines, ours_lines, theirs_lines, target_branch, source_branch);
     return true;
  
+}
+static string fetch_raw_object(const string &object_hash) {
+    if (object_hash.empty()) return "";
+    string obj_path = ".voxel/objects/" + object_hash;
+    if (!fs::exists(obj_path)) return "";
+    return FileSystem::read_file_to_string(obj_path);
+}
+static string get_media_content_from_commit(const string &commit_hash, const string &filepath) {
+    if (commit_hash.empty()) return "";
+    string blob_hash = get_file_blob_hash_from_commit(commit_hash, filepath);
+    return fetch_raw_object(blob_hash);
+}
+static bool process_media_file_merge(const string &filepath, const string &target_branch, const string &source_branch, const string &base_commit) {
+    string base_content = get_media_content_from_commit(base_commit, filepath);
+    string ours_content = FileSystem::read_file_to_string(filepath);
+    string theirs_content = get_media_content_from_commit(merge::get_branch_commit(source_branch), filepath);
+
+    if (ours_content == theirs_content) {
+        // Identical on both sides (byte-for-byte) - nothing to do.
+        return false;
+    }
+    if (base_content == ours_content && base_content != theirs_content) {
+        // Fast-forward: we never touched it, they did - take theirs.
+        fs::path dest = fs::path(SANDBOX_DIR) / filepath;
+        fs::create_directories(dest.parent_path());
+        ofstream out(dest, ios::binary);
+        out.write(theirs_content.data(), static_cast<streamsize>(theirs_content.size()));
+        return false;
+    }
+    if (base_content == theirs_content && base_content != ours_content) {
+        // Fast-forward: they never touched it, we did - keep ours as-is.
+        // (Nothing written to the sandbox, so apply_sandbox_to_workspace
+        // leaves the current workspace file untouched.)
+        return false;
+    }
+
+    // True conflict: both sides changed this media/binary asset differently.
+    // There's no way to line-merge a video/image/blend file, so drop a plain
+    // text note into the sandbox describing the size mismatch (mirrors how
+    // text conflicts leave a reviewable markers file), in addition to asking
+    // directly. The note is named after the media file (with a
+    // ".CONFLICT_INFO.txt" suffix) so it never collides with the real
+    // filepath the media file itself would occupy.
+    fs::path info_dest = fs::path(SANDBOX_DIR) / (filepath + ".CONFLICT_INFO.txt");
+    fs::create_directories(info_dest.parent_path());
+
+    auto write_conflict_info = [&](const string &resolution_note) {
+        ofstream info_out(info_dest, ios::trunc);
+        info_out << "Merge conflict: binary/media file changed on both sides\n";
+        info_out << "File: " << filepath << "\n\n";
+        info_out << "  Ours   (" << target_branch << "): " << merge_format_human_size(ours_content.size())
+                  << " (" << ours_content.size()   << " bytes)\n";
+        info_out << "  Theirs (" << source_branch << "): " << merge_format_human_size(theirs_content.size())
+                  << " (" << theirs_content.size() << " bytes)\n\n";
+        info_out << "This is a binary/media file and can't be automatically line-merged.\n";
+        if (resolution_note.empty()) {
+            info_out << "Awaiting resolution: [1] Keep OURS   [2] Keep THEIRS   [3] Keep BOTH\n";
+        } else {
+            info_out << "Resolution: " << resolution_note << "\n";
+        }
+    };
+    write_conflict_info("");
+
+    cout << "\033[1;31mMedia conflict detected in: " << filepath << "\033[0m\n";
+    cout << "  Ours   (" << target_branch << "): " << merge_format_human_size(ours_content.size())
+         << " (" << ours_content.size()   << " bytes)\n";
+    cout << "  Theirs (" << source_branch << "): " << merge_format_human_size(theirs_content.size())
+         << " (" << theirs_content.size() << " bytes)\n";
+    cout << "This is a binary/media file and can't be automatically line-merged.\n";
+    cout << "  A summary was also written to " << info_dest.string() << "\n";
+    cout << "  [1] Keep OURS\n";
+    cout << "  [2] Keep THEIRS\n";
+    cout << "  [3] Keep BOTH (theirs saved alongside as a renamed copy)\n";
+    cout << "Selection [1-3]: ";
+    int choice = 0;
+    cin >> choice;
+
+    if (choice == 2) {
+        fs::path dest = fs::path(SANDBOX_DIR) / filepath;
+        fs::create_directories(dest.parent_path());
+        ofstream out(dest, ios::binary);
+        out.write(theirs_content.data(), static_cast<streamsize>(theirs_content.size()));
+        cout << "Kept THEIRS for " << filepath << "\n";
+        write_conflict_info("Kept THEIRS (" + source_branch + ")");
+    } else if (choice == 3) {
+        // Ours stays untouched at its original path (nothing written there).
+        // Theirs gets saved alongside it under a branch-suffixed name so
+        // nothing is silently discarded.
+        fs::path original(filepath);
+        fs::path parent = original.parent_path();
+        fs::path renamed_name = parent / (original.stem().string() + "_" + source_branch + original.extension().string());
+
+        fs::path renamed_dest = fs::path(SANDBOX_DIR) / renamed_name;
+        fs::create_directories(renamed_dest.parent_path());
+        ofstream out(renamed_dest, ios::binary);
+        out.write(theirs_content.data(), static_cast<streamsize>(theirs_content.size()));
+        cout << "Kept BOTH: ours unchanged, theirs saved as " << renamed_name.string() << "\n";
+        write_conflict_info("Kept BOTH: ours unchanged, theirs saved alongside as " + renamed_name.string());
+    } else {
+        if (choice != 1) {
+            cout << "Invalid choice. Defaulting to OURS to protect workspace files.\n";
+        }
+        // Keep OURS: nothing written to the sandbox, workspace file untouched.
+        cout << "Kept OURS for " << filepath << "\n";
+        write_conflict_info("Kept OURS (" + target_branch + ")");
+    }
+
+    return true; // Required a manual decision, so it counts as a resolved conflict.
 }
 void merge::resolve_conflict_interactive(const string &filepath,const vector<string> &base_lines,const vector<string> &ours_lines,const vector<string> &theirs_lines,const string &target_branch,const string &source_branch) {
     bool has_conflict = false;
@@ -1543,13 +1735,13 @@ string merge::find_lowest_common_ancestor(const string& branchA, const string& b
     if (commitA.empty() || commitB.empty()) return "";
     if (commitA == commitB) return commitA; // They are on the exact same commit
  
-    // Fetch the repository graph map
+    
     map<string, Commands::CommitNode> graph = Commands::build_complete_repo_graph().second;
  
     set<string> history_of_A;
     string currentA = commitA;
  
-    // 1. Walk backward from Branch A to the beginning
+    
     while (!currentA.empty() && currentA != "NONE") {
         history_of_A.insert(currentA);
         if (graph.find(currentA) != graph.end()) {
@@ -1572,4 +1764,3 @@ string merge::find_lowest_common_ancestor(const string& branchA, const string& b
  
     return ""; 
 }
-

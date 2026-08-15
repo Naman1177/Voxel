@@ -55,6 +55,38 @@ using json = nlohmann::json;
 #define DIM "\033[2m"
 
 static atomic<bool> g_mesh_active(true);
+static void mesh_signal_handler(int signum)
+{
+    (void)signum;
+    g_mesh_active = false;
+}
+static bool daemonize_mesh_process(const string &log_file)
+{
+    pid_t pid = fork();
+    if (pid < 0)
+    {
+        cerr << "\033[1;31mError: Could not background the mesh process (fork failed).\033[0m\n";
+        return false;
+    }
+    if (pid > 0)
+    {
+        // Parent: hand off to the child and let the caller return control to the shell.
+        return false;
+    }
+
+    // Child: become a session leader so closing the parent's terminal (SIGHUP)
+    // does not propagate to us, then detach stdio from that terminal.
+    setsid();
+    freopen("/dev/null", "r", stdin);
+    freopen(log_file.c_str(), "a", stdout);
+    freopen(log_file.c_str(), "a", stderr);
+
+    signal(SIGINT, mesh_signal_handler);
+    signal(SIGTERM, mesh_signal_handler);
+    signal(SIGHUP, SIG_IGN);
+
+    return true;
+}
 void Cloud::pack_repository(const vector<string> &args)
 {
     if (!fs::exists(".voxel"))
@@ -298,9 +330,6 @@ void Cloud::host_mesh(const vector<string> &args){
         cerr << "Run \033[1;36mvoxel meshoff\033[0m to terminate the current session before hosting again.\n";
         return;
     }
-    ofstream lock(".voxel/mesh/host.lock");
-    lock << getpid();
-    lock.close();
     string token = generate_mesh_token();
     auto start_time = chrono::steady_clock::now();
     cout << "\033[1;34m=== Starting Voxel P2P Mesh Host ===\033[0m\n";
@@ -348,7 +377,27 @@ void Cloud::host_mesh(const vector<string> &args){
         return;
     }
     listen(tcp_fd, SOMAXCONN);
-    cout << "\033[1;35mMesh listening on TCP Port " << TCP_TRANSFER_PORT << ". Waiting for clients...\033[0m\n";
+
+    // Daemonize: from here on the host must stay reachable on TCP 1177 until
+    // 'voxel meshoff' is run, independent of whether this terminal/session
+    // stays open. The parent hands off and returns; only the child continues.
+    bool is_daemon_child = daemonize_mesh_process(".voxel/mesh/host.log");
+    if (!is_daemon_child)
+    {
+        cout << "\033[1;32m[Mesh] Host is now running in the background.\033[0m\n";
+        cout << "\033[1;35mMesh listening on TCP Port " << TCP_TRANSFER_PORT << ". Waiting for clients...\033[0m\n";
+        cout << "\033[1;36mRun 'voxel meshoff' anytime to stop hosting.\033[0m\n";
+        close(udp_fd);
+        close(tcp_fd);
+        return;
+    }
+
+    ofstream lock(".voxel/mesh/host.lock");
+    lock << getpid();
+    lock.close();
+
+    cout << "\033[1;35m[Mesh] Host daemon started (PID " << getpid() << "). Listening on TCP Port "
+         << TCP_TRANSFER_PORT << ".\033[0m\n";
     json connections_ledger;
     connections_ledger["host_hardware_id"] = get_node_hardware_id();
     connections_ledger["connections"] = json::array();
@@ -541,6 +590,12 @@ void Cloud::client_mesh(const vector<string> &args)
         cerr << "\033[1;31mError: Cannot run client while hosting.\033[0m\n";
         return;
     }
+    if (fs::exists(".voxel/mesh/client.lock"))
+    {
+        cerr << "\033[1;33mWarning: An active Voxel Client listener is already running on this machine.\033[0m\n";
+        cerr << "Run \033[1;36mvoxel meshoff\033[0m to stop it before pairing again.\n";
+        return;
+    }
 
     string target_token = "";
     string host_ip = "";
@@ -706,27 +761,218 @@ void Cloud::client_mesh(const vector<string> &args)
 
     close(tcp_fd);
     cout << "\033[1;32mSuccessfully synced and registered node with Mesh Host!\033[0m\n";
+
+    // ==========================================================
+    // Stay online: open our own TCP listener on port 1177 and keep
+    // it open until 'voxel meshoff' is run, so later commands (e.g.
+    // the host pulling from this client) can always reach us - not
+    // just during the few seconds right after pairing.
+    // ==========================================================
+    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    int opt = 1;
+    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+
+    sockaddr_in listen_addr{};
+    listen_addr.sin_family = AF_INET;
+    listen_addr.sin_port = htons(TCP_TRANSFER_PORT);
+    listen_addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (::bind(listen_fd, (struct sockaddr *)&listen_addr, sizeof(listen_addr)) < 0)
+    {
+        cerr << "\033[1;33mWarning: Could not open client listener on TCP Port " << TCP_TRANSFER_PORT
+             << " (already in use?). Mesh sync succeeded, but this node will not stay reachable.\033[0m\n";
+        return;
+    }
+    listen(listen_fd, SOMAXCONN);
+
+    bool is_daemon_child = daemonize_mesh_process(".voxel/mesh/client.log");
+    if (!is_daemon_child)
+    {
+        cout << "\033[1;32m[Mesh] Client is now running in the background, listening on TCP Port "
+             << TCP_TRANSFER_PORT << ".\033[0m\n";
+        cout << "\033[1;36mRun 'voxel meshoff' anytime to stop listening.\033[0m\n";
+        close(listen_fd);
+        return;
+    }
+
+    ofstream client_lock(".voxel/mesh/client.lock");
+    client_lock << getpid();
+    client_lock.close();
+
+    cout << "\033[1;35m[Mesh] Client daemon started (PID " << getpid() << "). Listening on TCP Port "
+         << TCP_TRANSFER_PORT << ".\033[0m\n";
+
+    string paired_host_hwid = "";
+    if (fs::exists(".voxel/mesh/host_info.json"))
+    {
+        try
+        {
+            json saved_host_info;
+            ifstream hinfo(".voxel/mesh/host_info.json");
+            hinfo >> saved_host_info;
+            hinfo.close();
+            if (saved_host_info.contains("hardware_id"))
+                paired_host_hwid = saved_host_info["hardware_id"].get<string>();
+        }
+        catch (...)
+        {
+            paired_host_hwid = "";
+        }
+    }
+
+    g_mesh_active = true;
+    while (g_mesh_active)
+    {
+        pollfd fds[1];
+        fds[0].fd = listen_fd;
+        fds[0].events = POLLIN;
+        int ret = poll(fds, 1, 1000);
+        if (ret <= 0)
+            continue;
+        if (!(fds[0].revents & POLLIN))
+            continue;
+
+        sockaddr_in peer_addr{};
+        socklen_t addr_len = sizeof(peer_addr);
+        int peer_fd = accept(listen_fd, (struct sockaddr *)&peer_addr, &addr_len);
+        if (peer_fd < 0)
+            continue;
+
+        uint32_t req_len = 0;
+        if (recv_exact(peer_fd, &req_len, sizeof(req_len)) && req_len > 0 && req_len < 65536)
+        {
+            string req_buf(req_len, '\0');
+            if (recv_exact(peer_fd, &req_buf[0], req_len))
+            {
+                try
+                {
+                    json req = json::parse(req_buf);
+
+                    // Zero-trust: only serve pull requests from the host we paired with.
+                    bool verified = !paired_host_hwid.empty() &&
+                                     req.contains("hardware_id") &&
+                                     req["hardware_id"] == paired_host_hwid;
+
+                    if (!verified || req["action"] != "PULL")
+                    {
+                        cerr << "\033[1;31m[Mesh Security] Blocked unauthorized request on client listener.\033[0m\n";
+                        close(peer_fd);
+                        continue;
+                    }
+
+                    string pack_target = ".voxel/mesh/live_payload.vxlpack";
+                    if (req["target"] == "ALL")
+                    {
+                        vector<string> pargs = {".voxel/mesh/live_payload"};
+                        Cloud::pack_repository(pargs);
+                    }
+                    else
+                    {
+                        Cloud::pack_targeted_branch(req["target"], pack_target);
+                    }
+
+                    string bytes = FileSystem::read_file_to_string(pack_target);
+                    string sha = Hashing::generate_sha256(bytes);
+
+                    uint32_t sha_len = sha.length();
+                    send_exact(peer_fd, &sha_len, sizeof(sha_len));
+                    send_exact(peer_fd, sha.c_str(), sha_len);
+
+                    uint64_t f_size = bytes.size();
+                    send_exact(peer_fd, &f_size, sizeof(f_size));
+
+                    size_t sent = 0;
+                    while (sent < f_size)
+                    {
+                        size_t chunk = min<size_t>(BUFFER_SIZE, f_size - sent);
+                        ssize_t pushed = send(peer_fd, bytes.data() + sent, chunk, 0);
+                        if (pushed <= 0)
+                            break;
+                        sent += pushed;
+                    }
+
+                    fs::remove(pack_target);
+                }
+                catch (...)
+                {
+                    cerr << "\033[1;31m[Mesh Error] Failed to parse incoming request on client listener.\033[0m\n";
+                }
+            }
+        }
+        close(peer_fd);
+    }
+
+    close(listen_fd);
+    fs::remove(".voxel/mesh/client.lock");
+    cout << "\033[1;33m[Mesh] Client listener closed.\033[0m\n";
+}
+static bool stop_mesh_daemon(const string &lock_path, const string &role_label)
+{
+    if (!fs::exists(lock_path))
+        return false;
+
+    ifstream lock(lock_path);
+    int daemon_pid = -1;
+    lock >> daemon_pid;
+    lock.close();
+
+    if (daemon_pid > 0)
+    {
+        // SIGINT is caught by mesh_signal_handler in the daemon loop, which
+        // flips g_mesh_active to false so the loop exits and runs its own
+        // cleanup (closing sockets, removing lock/payload files) instead of
+        // just being killed.
+        if (kill(daemon_pid, SIGINT) == 0)
+        {
+            // Give the daemon a moment to notice the signal (poll() timeout
+            // inside the loop is 1s) and finish its own cleanup.
+            for (int i = 0; i < 30; ++i)
+            {
+                if (kill(daemon_pid, 0) != 0)
+                    break; // process is gone
+                usleep(100000); // 100ms
+            }
+            // If it's still alive after ~3s, force it.
+            if (kill(daemon_pid, 0) == 0)
+            {
+                kill(daemon_pid, SIGKILL);
+            }
+        }
+        else
+        {
+            cerr << "\033[1;33mWarning: Could not signal " << role_label
+                 << " process (PID " << daemon_pid << "). It may have already stopped.\033[0m\n";
+        }
+    }
+
+    // Always clean up the lock file even if the process was already gone.
+    if (fs::exists(lock_path))
+    {
+        fs::remove(lock_path);
+    }
+    return true;
 }
 void Cloud::mesh_off(const vector<string> &args)
 {
-    if (fs::exists(".voxel/mesh/host.lock")) {
-        ifstream lock(".voxel/mesh/host.lock");
-        int host_pid; 
-        
-        if (lock >> host_pid) {
-            // Send a POSIX termination signal to the running Host process
-            kill(host_pid, SIGINT); 
-        }
-        lock.close();
-        
-        // Clean up the lock and payload files
-        fs::remove(".voxel/mesh/host.lock");
-        if(fs::exists(".voxel/mesh/mesh_payload.vxlpack")) {
+    bool stopped_anything = false;
+
+    if (stop_mesh_daemon(".voxel/mesh/host.lock", "Host"))
+    {
+        if (fs::exists(".voxel/mesh/mesh_payload.vxlpack")) {
             fs::remove(".voxel/mesh/mesh_payload.vxlpack");
         }
-        
-        cout << "\033[1;33mVoxel Mesh session shut down. Machine is offline.\033[0m\n";
-    } else {
+        cout << "\033[1;33mVoxel Mesh Host session shut down. Port " << TCP_TRANSFER_PORT << " is now closed.\033[0m\n";
+        stopped_anything = true;
+    }
+
+    if (stop_mesh_daemon(".voxel/mesh/client.lock", "Client"))
+    {
+        cout << "\033[1;33mVoxel Mesh Client listener shut down. Port " << TCP_TRANSFER_PORT << " is now closed.\033[0m\n";
+        stopped_anything = true;
+    }
+
+    if (!stopped_anything)
+    {
         cout << "\033[1;33mNo active Mesh session found.\033[0m\n";
     }
 }
@@ -951,9 +1197,52 @@ void Cloud::pull_repository(const vector<string> &args) {
         return;
     }
 
+    // 5b. For a full "ALL" pull, don't stop at the active branch - bring every
+    // other branch pointer along too. Their commit objects were already copied
+    // into .voxel/objects above, so once the ref exists locally the branch is
+    // fully usable (voxel switch/log/graph/restore all just read refs/heads).
+    // The active branch is intentionally skipped here since it already went
+    // through the merge path above (the client may have diverged on it).
+    if (target_branch == "ALL") {
+        string sandbox_refs_dir = safe_sandbox + "/refs/heads";
+        if (fs::exists(sandbox_refs_dir)) {
+            if (!fs::exists(".voxel/refs/heads")) fs::create_directories(".voxel/refs/heads");
+            int synced_branches = 0;
+            for (const auto& entry : fs::directory_iterator(sandbox_refs_dir)) {
+                if (!entry.is_regular_file()) continue;
+                string branch_file = entry.path().filename().string();
+                if (branch_file == incoming_branch_name) continue; // handled via merge above
+                fs::copy_file(entry.path(), ".voxel/refs/heads/" + branch_file, fs::copy_options::overwrite_existing);
+                synced_branches++;
+            }
+            if (synced_branches > 0) {
+                cout << "\033[1;32mSynced " << synced_branches << " additional branch pointer(s) from host.\033[0m\n";
+            }
+        }
+    }
+
     // 6. Execute the Merge Engine
     cout << "\033[1;33mRouting updated code into sandbox conflict engine...\033[0m\n";
     merge::execute(active_branch, incoming_mesh_ref);
+
+    // 6b. merge::execute only updates commit objects/refs - it does not
+    // rewrite the files on disk. Explicitly check out the resulting HEAD
+    // of the active branch so the workspace actually reflects the pull
+    // instead of just reporting success while leaving files untouched.
+    Commands::restore_workspace_state("");
+    Commands::clear_snapshot_silent();
+    Commands::create_snapshot();
+
+    // 6c. Remove the temporary "<branch>_mesh" ref used only to feed the
+    // merge above - leaving it around pollutes the branch/commit graph
+    // (voxel log/graph/restore) with a stale pointer on every future run.
+    string incoming_mesh_ref_path = ".voxel/refs/heads/" + incoming_mesh_ref;
+    if (fs::exists(incoming_mesh_ref_path))
+    {
+        fs::remove(incoming_mesh_ref_path);
+    }
+
+    cout << "\033[1;32mWorkspace updated to match pulled changes.\033[0m\n";
 
     // 7. Clean up the sandbox
     fs::remove(pull_temp);
