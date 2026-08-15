@@ -2,12 +2,12 @@
 
 **A fast, local-first version control system — with AI built in.**
 
-Voxel is Git-like in spirit, but rebuilt from scratch in C++ with its own storage format, its own diff/merge engine, and a friendlier vocabulary. This document explains **how Voxel actually works and how to think about it** — not the exact commands to type. For that, see [`Commands.md`](Commands.md).
+Voxel is Git-like in spirit, but rebuilt from scratch in C++ with its own storage format, its own diff/merge engine, and a friendlier vocabulary. This document explains **how Voxel actually works and how to think about it** — not the exact commands to type. For that, see [`Commands.md`](commands.md).
 
 | I want to... | Go to |
 | --- | --- |
 | 🚀 Install Voxel | [`installation.md`](installation.md) |
-| 📖 See every command & flag | [`Commands.md`](Commands.md) |
+| 📖 See every command & flag | [`Commands.md`](commands.md) |
 | 📊 See it benchmarked against Git | [`Benchmarks.md`](Benchmarks.md) |
 
 ---
