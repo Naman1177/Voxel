@@ -225,4 +225,4 @@ Both are bundled inside Voxel — nothing extra to install.
 
 **Voxel was designed and written by Naman Malhotra.**
 
-If Voxel's fast, or the AI commit messages saved you from writing "fix stuff" for the hundredth time, consider dropping a ⭐ on the repo — it genuinely helps.
+If Voxel's fast, or the AI commit messages saved you from writing "fix stuff" for the hundredth time, consider dropping a ⭐ on the repo it genuinely helps.
